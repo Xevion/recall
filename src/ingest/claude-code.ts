@@ -1,7 +1,7 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
-import { resolve } from "node:path";
 import { all, run } from "../db/index";
 import type { IngestOptions, IngestResult } from "./index";
+import { persistSession } from "./persist";
 import type {
 	NormalizedMessage,
 	NormalizedSession,
@@ -108,9 +108,16 @@ async function parseClaudeCodeSession(
 	}
 	if (events.length === 0) return null;
 
-	const firstEvent = events[0] as Record<string, unknown>;
-	const lastEvent = events[events.length - 1] as Record<string, unknown>;
-	const sessionId = (firstEvent.sessionId as string) ?? filePath;
+	// Extract sessionId from first event that has it (file-history-snapshot has none)
+	const metaEvent = events.find((e) => e.sessionId != null) ?? events[0] ?? {};
+	const sessionId = (metaEvent.sessionId as string) ?? filePath;
+
+	const firstTimestampedEvent =
+		events.find((e) => e.timestamp != null) ?? events[0] ?? {};
+	const lastTimestampedEvent =
+		[...events].reverse().find((e) => e.timestamp != null) ??
+		events[events.length - 1] ??
+		{};
 
 	const messages: NormalizedMessage[] = [];
 	const toolCalls: NormalizedToolCall[] = [];
@@ -123,6 +130,9 @@ async function parseClaudeCodeSession(
 	for (const event of events) {
 		const type = event.type as string;
 		if (type !== "user" && type !== "assistant") continue;
+
+		// Skip meta events (system prompts, tool injection, etc.)
+		if (event.isMeta === true) continue;
 
 		const msg = event.message as Record<string, unknown> | undefined;
 		if (!msg) continue;
@@ -161,6 +171,10 @@ async function parseClaudeCodeSession(
 						isError: false,
 						durationMs: null,
 					});
+				} else if (block.type === "tool_result" && block.is_error) {
+					// Mark the corresponding tool call as errored
+					const tc = toolCalls.find((t) => t.id === block.tool_use_id);
+					if (tc) tc.isError = true;
 				}
 			}
 		} else if (typeof contentBlocks === "string") {
@@ -181,36 +195,51 @@ async function parseClaudeCodeSession(
 		});
 	}
 
-	// Check for tool_result events to mark errors
-	for (const event of events) {
-		if (event.type === "tool_result") {
-			const toolResult = event as Record<string, unknown>;
-			if (toolResult.is_error) {
-				const tc = toolCalls.find((t) => t.id === toolResult.tool_use_id);
-				if (tc) tc.isError = true;
-			}
-		}
-	}
+	// Skip sessions with no real messages (e.g. only file-history-snapshot events)
+	if (messages.length === 0) return null;
 
-	// Extract subagent metadata
+	// Read .meta.json companion file for subagent agentType and description
 	let subagent: NormalizedSubagent | null = null;
-	if (parentId || (firstEvent.isSidechain as boolean)) {
+	if (parentId || (metaEvent.isSidechain as boolean)) {
 		const firstUserMsg = messages.find((m) => m.role === "user");
 		const lastAssistantMsg = [...messages]
 			.reverse()
 			.find((m) => m.role === "assistant");
+
+		let agentType: string | null = (metaEvent.agentType as string) ?? null;
+		let description: string | null = null;
+
+		const metaPath = filePath.replace(".jsonl", ".meta.json");
+		const metaFile = Bun.file(metaPath);
+		if (await metaFile.exists()) {
+			try {
+				const meta = JSON.parse(await metaFile.text()) as Record<
+					string,
+					unknown
+				>;
+				agentType = (meta.agentType as string) ?? agentType;
+				description = (meta.description as string) ?? null;
+			} catch {
+				// Ignore malformed .meta.json
+			}
+		}
+
 		subagent = {
 			sessionId,
-			agentType: (firstEvent.agentType as string) ?? null,
-			description: null, // populated from .meta.json in Phase 4
-			slug: (firstEvent.slug as string) ?? null,
+			agentType,
+			description,
+			slug: (metaEvent.slug as string) ?? null,
 			prompt: firstUserMsg?.content ?? null,
 			result: lastAssistantMsg?.content ?? null,
 		};
 	}
 
-	const startedAt = new Date((firstEvent.timestamp as string) ?? Date.now());
-	const endedAt = new Date((lastEvent.timestamp as string) ?? Date.now());
+	const startedAt = new Date(
+		(firstTimestampedEvent.timestamp as string) ?? Date.now(),
+	);
+	const endedAt = new Date(
+		(lastTimestampedEvent.timestamp as string) ?? Date.now(),
+	);
 	const durationS = Math.round(
 		(endedAt.getTime() - startedAt.getTime()) / 1000,
 	);
@@ -227,9 +256,9 @@ async function parseClaudeCodeSession(
 		id: sessionId,
 		source: "claude-code",
 		parentId: parentId ?? null,
-		projectPath: (firstEvent.cwd as string) ?? null,
+		projectPath: (metaEvent.cwd as string) ?? null,
 		projectName,
-		gitBranch: (firstEvent.gitBranch as string) ?? null,
+		gitBranch: (metaEvent.gitBranch as string) ?? null,
 		title: null,
 		startedAt,
 		endedAt,
@@ -256,89 +285,4 @@ function summarizeInput(
 	if (input.query) return `query: ${String(input.query).slice(0, 100)}`;
 	if (input.prompt) return `prompt: ${String(input.prompt).slice(0, 100)}`;
 	return JSON.stringify(input).slice(0, 100);
-}
-
-async function persistSession(
-	db: DuckDBConnection,
-	session: NormalizedSession,
-): Promise<void> {
-	await run(
-		db,
-		`INSERT OR REPLACE INTO session
-     (id, source, parent_id, project_path, project_name, git_branch, title,
-      started_at, ended_at, message_count, turn_count, token_input, token_output,
-      duration_s, source_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.id,
-		session.source,
-		session.parentId,
-		session.projectPath,
-		session.projectName,
-		session.gitBranch,
-		session.title,
-		session.startedAt.toISOString(),
-		session.endedAt?.toISOString() ?? null,
-		session.messageCount,
-		session.turnCount,
-		session.tokenInput,
-		session.tokenOutput,
-		session.durationS,
-		session.sourcePath,
-	);
-
-	for (const msg of session.messages) {
-		await run(
-			db,
-			`INSERT OR REPLACE INTO message
-       (id, session_id, role, model, seq, timestamp, token_input, token_output, content, has_tool_use)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			msg.id,
-			msg.sessionId,
-			msg.role,
-			msg.model,
-			msg.seq,
-			msg.timestamp?.toISOString() ?? null,
-			msg.tokenInput,
-			msg.tokenOutput,
-			msg.content,
-			msg.hasToolUse,
-		);
-	}
-
-	for (const tc of session.toolCalls) {
-		await run(
-			db,
-			`INSERT OR REPLACE INTO tool_call
-       (id, message_id, session_id, tool_name, input_summary, is_error, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			tc.id,
-			tc.messageId,
-			tc.sessionId,
-			tc.toolName,
-			tc.inputSummary,
-			tc.isError,
-			tc.durationMs,
-		);
-	}
-
-	if (session.subagent) {
-		await run(
-			db,
-			`INSERT OR REPLACE INTO subagent
-       (session_id, agent_type, slug, prompt, result)
-       VALUES (?, ?, ?, ?, ?)`,
-			session.subagent.sessionId,
-			session.subagent.agentType,
-			session.subagent.slug,
-			session.subagent.prompt,
-			session.subagent.result,
-		);
-	}
-
-	// Create pending analysis record
-	await run(
-		db,
-		`INSERT OR IGNORE INTO analysis (session_id, status) VALUES (?, 'pending')`,
-		session.id,
-	);
 }

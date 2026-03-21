@@ -1,7 +1,8 @@
-import type { DuckDBConnection } from "@duckdb/node-api";
 import { Database as SQLiteDB } from "bun:sqlite";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, run } from "../db/index";
 import type { IngestOptions, IngestResult } from "./index";
+import { persistSession } from "./persist";
 import type {
 	NormalizedMessage,
 	NormalizedSession,
@@ -37,15 +38,20 @@ export async function ingestOpenCode(
 					id: string;
 					project_id: string;
 					parent_id: string | null;
-					title: string | null;
+					directory: string;
+					title: string;
+					time_created: number;
+					time_updated: number;
 				},
 				[]
-			>("SELECT id, project_id, parent_id, title FROM session")
+			>(
+				"SELECT id, project_id, parent_id, directory, title, time_created, time_updated FROM session",
+			)
 			.all();
 
 		for (const ocSession of sessions) {
 			try {
-				const sessionId = `oc-${ocSession.id}`;
+				const sessionId = ocSession.id;
 
 				// Check if already ingested
 				if (!opts.force) {
@@ -62,7 +68,7 @@ export async function ingestOpenCode(
 
 				const session = parseOpenCodeSession(sqlite, ocSession, sessionId);
 				if (session) {
-					await persistOpenCodeSession(db, session);
+					await persistSession(db, session);
 					await run(
 						db,
 						"INSERT OR REPLACE INTO ingest_log (source_path, source, session_id) VALUES (?, 'opencode', ?)",
@@ -88,85 +94,115 @@ function parseOpenCodeSession(
 		id: string;
 		project_id: string;
 		parent_id: string | null;
-		title: string | null;
+		directory: string;
+		title: string;
+		time_created: number;
+		time_updated: number;
 	},
 	sessionId: string,
 ): NormalizedSession | null {
-	// Get messages for this session
-	const ocMessages = sqlite
+	// Get messages for this session — role/modelID/tokens are in the data JSON blob
+	const rawMessages = sqlite
 		.query<
-			{ id: string; session_id: string; role: string; model_id: string | null },
+			{ id: string; session_id: string; time_created: number; data: string },
 			[string]
 		>(
-			"SELECT id, session_id, role, model_id FROM message WHERE session_id = ? ORDER BY rowid",
-			ocSession.id,
+			"SELECT id, session_id, time_created, data FROM message WHERE session_id = ? ORDER BY rowid",
 		)
-		.all();
+		.all(ocSession.id);
 
-	if (ocMessages.length === 0) return null;
+	if (rawMessages.length === 0) return null;
 
-	// Get parts for all messages
 	const messages: NormalizedMessage[] = [];
 	const toolCalls: NormalizedToolCall[] = [];
 	let turnCount = 0;
+	let totalTokenInput = 0;
+	let totalTokenOutput = 0;
 	let lastRole = "";
 
-	for (let seq = 0; seq < ocMessages.length; seq++) {
-		const ocMsg = ocMessages[seq];
-		const role = ocMsg.role;
+	for (let seq = 0; seq < rawMessages.length; seq++) {
+		const rawMsg = rawMessages[seq]!;
 
+		let msgData: Record<string, unknown>;
+		try {
+			msgData = JSON.parse(rawMsg.data) as Record<string, unknown>;
+		} catch {
+			continue;
+		}
+
+		const role = (msgData.role as string) ?? "unknown";
 		if (role === "user" && lastRole !== "user") turnCount++;
 		lastRole = role;
 
-		const parts = sqlite
-			.query<{ id: string; type: string; data: string }, [string]>(
-				"SELECT id, type, data FROM part WHERE message_id = ? ORDER BY rowid",
-				ocMsg.id,
+		const tokens = msgData.tokens as Record<string, number> | undefined;
+		const inputTokens = tokens?.input ?? 0;
+		const outputTokens = tokens?.output ?? 0;
+		totalTokenInput += inputTokens;
+		totalTokenOutput += outputTokens;
+
+		// Get parts for this message — type/tool info are in the data JSON blob
+		const rawParts = sqlite
+			.query<{ id: string; message_id: string; data: string }, [string]>(
+				"SELECT id, message_id, data FROM part WHERE message_id = ? ORDER BY rowid",
 			)
-			.all();
+			.all(rawMsg.id);
 
 		let textContent = "";
 		let hasToolUse = false;
 
-		for (const part of parts) {
+		for (const rawPart of rawParts) {
+			let partData: Record<string, unknown>;
 			try {
-				const data = JSON.parse(part.data);
-				if (part.type === "text") {
-					textContent += (data.text ?? data.value ?? "") + "\n";
-				} else if (part.type === "tool") {
-					hasToolUse = true;
-					toolCalls.push({
-						id: part.id,
-						messageId: ocMsg.id,
-						sessionId,
-						toolName: data.tool ?? data.name ?? "unknown",
-						inputSummary: data.args
-							? JSON.stringify(data.args).slice(0, 100)
-							: null,
-						isError: data.status === "error",
-						durationMs: null,
-					});
-				}
+				partData = JSON.parse(rawPart.data) as Record<string, unknown>;
 			} catch {
-				// Skip unparseable parts
+				continue;
+			}
+
+			if (partData.type === "text") {
+				textContent += ((partData.text as string) ?? "") + "\n";
+			} else if (partData.type === "tool") {
+				hasToolUse = true;
+				const state = partData.state as
+					| Record<string, unknown>
+					| string
+					| null
+					| undefined;
+				const isError =
+					state === "error" ||
+					(typeof state === "object" &&
+						state !== null &&
+						state.status === "error");
+				const stateObj =
+					typeof state === "object" && state !== null ? state : null;
+				toolCalls.push({
+					id: (partData.callID as string) ?? rawPart.id,
+					messageId: rawMsg.id,
+					sessionId,
+					toolName: (partData.tool as string) ?? "unknown",
+					inputSummary: stateObj?.input
+						? JSON.stringify(stateObj.input).slice(0, 100)
+						: null,
+					isError,
+					durationMs: null,
+				});
 			}
 		}
 
 		messages.push({
-			id: ocMsg.id,
+			id: rawMsg.id,
 			sessionId,
 			role,
-			model: ocMsg.model_id,
+			model: (msgData.modelID as string) ?? null,
 			seq,
-			timestamp: null, // OpenCode doesn't store per-message timestamps in the same way
-			tokenInput: 0,
-			tokenOutput: 0,
+			timestamp: new Date(rawMsg.time_created),
+			tokenInput: inputTokens,
+			tokenOutput: outputTokens,
 			content: textContent.trim() || null,
 			hasToolUse,
 		});
 	}
 
-	const parentId = ocSession.parent_id ? `oc-${ocSession.parent_id}` : null;
+	const parentId = ocSession.parent_id ?? null;
 
 	let subagent: NormalizedSubagent | null = null;
 	if (parentId) {
@@ -188,107 +224,23 @@ function parseOpenCodeSession(
 		id: sessionId,
 		source: "opencode",
 		parentId,
-		projectPath: null,
+		projectPath: ocSession.directory || null,
 		projectName:
 			ocSession.project_id === "global" ? null : ocSession.project_id,
 		gitBranch: null,
-		title: ocSession.title,
-		startedAt: new Date(), // Will be refined when we have timestamp data
-		endedAt: null,
+		title: ocSession.title || null,
+		startedAt: new Date(ocSession.time_created),
+		endedAt: new Date(ocSession.time_updated),
 		messageCount: messages.length,
 		turnCount,
-		tokenInput: 0,
-		tokenOutput: 0,
-		durationS: 0,
+		tokenInput: totalTokenInput,
+		tokenOutput: totalTokenOutput,
+		durationS: Math.round(
+			(ocSession.time_updated - ocSession.time_created) / 1000,
+		),
 		sourcePath: `opencode:${ocSession.id}`,
 		messages,
 		toolCalls,
 		subagent,
 	};
-}
-
-async function persistOpenCodeSession(
-	db: DuckDBConnection,
-	session: NormalizedSession,
-): Promise<void> {
-	// Reuse the same persistence logic as claude-code
-	// TODO: extract shared persistSession into a common module
-	await run(
-		db,
-		`INSERT OR REPLACE INTO session
-     (id, source, parent_id, project_path, project_name, git_branch, title,
-      started_at, ended_at, message_count, turn_count, token_input, token_output,
-      duration_s, source_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		session.id,
-		session.source,
-		session.parentId,
-		session.projectPath,
-		session.projectName,
-		session.gitBranch,
-		session.title,
-		session.startedAt.toISOString(),
-		session.endedAt?.toISOString() ?? null,
-		session.messageCount,
-		session.turnCount,
-		session.tokenInput,
-		session.tokenOutput,
-		session.durationS,
-		session.sourcePath,
-	);
-
-	for (const msg of session.messages) {
-		await run(
-			db,
-			`INSERT OR REPLACE INTO message
-       (id, session_id, role, model, seq, timestamp, token_input, token_output, content, has_tool_use)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			msg.id,
-			msg.sessionId,
-			msg.role,
-			msg.model,
-			msg.seq,
-			msg.timestamp?.toISOString() ?? null,
-			msg.tokenInput,
-			msg.tokenOutput,
-			msg.content,
-			msg.hasToolUse,
-		);
-	}
-
-	for (const tc of session.toolCalls) {
-		await run(
-			db,
-			`INSERT OR REPLACE INTO tool_call
-       (id, message_id, session_id, tool_name, input_summary, is_error, duration_ms)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			tc.id,
-			tc.messageId,
-			tc.sessionId,
-			tc.toolName,
-			tc.inputSummary,
-			tc.isError,
-			tc.durationMs,
-		);
-	}
-
-	if (session.subagent) {
-		await run(
-			db,
-			`INSERT OR REPLACE INTO subagent
-       (session_id, agent_type, slug, prompt, result)
-       VALUES (?, ?, ?, ?, ?)`,
-			session.subagent.sessionId,
-			session.subagent.agentType,
-			session.subagent.slug,
-			session.subagent.prompt,
-			session.subagent.result,
-		);
-	}
-
-	await run(
-		db,
-		`INSERT OR IGNORE INTO analysis (session_id, status) VALUES (?, 'pending')`,
-		session.id,
-	);
 }

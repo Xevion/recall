@@ -98,6 +98,57 @@ export async function listSessions(
 	);
 }
 
+/**
+ * Resolve a partial session ID to a full one.
+ * - Exact match: returns immediately
+ * - Single prefix match: returns that session's ID
+ * - 2-5 matches: prints them and exits
+ * - 6+ matches: prints the count and exits
+ * - No matches: prints error and exits
+ */
+export async function resolveSessionId(
+	db: DuckDBConnection,
+	partial: string,
+): Promise<string | null> {
+	// Try exact match first
+	const exact = await all<{ id: string }>(
+		db,
+		"SELECT id FROM session WHERE id = ?",
+		partial,
+	);
+	if (exact.length === 1) return exact[0]!.id;
+
+	// Prefix match
+	const matches = await all<{ id: string; source: string; started_at: string }>(
+		db,
+		"SELECT id, source, started_at FROM session WHERE id LIKE ? ORDER BY started_at DESC LIMIT 6",
+		`${partial}%`,
+	);
+
+	if (matches.length === 0) {
+		console.error(`No session found matching: ${partial}`);
+		process.exit(1);
+	}
+
+	if (matches.length === 1) return matches[0]!.id;
+
+	if (matches.length <= 5) {
+		console.error(
+			`Ambiguous session ID "${partial}" — ${matches.length} matches:`,
+		);
+		for (const m of matches) {
+			console.error(`  ${m.id}  ${m.source}  ${m.started_at}`);
+		}
+		process.exit(1);
+	}
+
+	// 6+ means our LIMIT 6 query was full — could be even more
+	console.error(
+		`Ambiguous session ID "${partial}" — too many matches (6+). Be more specific.`,
+	);
+	process.exit(1);
+}
+
 export async function getToolStats(
 	db: DuckDBConnection,
 	opts: {

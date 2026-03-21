@@ -1,39 +1,45 @@
 import { Command } from "commander";
 import { all, close, getDb } from "../db/index";
+import { resolveSessionId } from "../db/queries";
+import { extractProjectName } from "../utils/path";
 
 export const showCommand = new Command("show")
 	.description("Show detailed session info")
-	.argument("<session-id>", "Session ID to show")
+	.argument("<session-id>", "Session ID (or unique prefix)")
 	.option("--json", "Output as JSON")
 	.action(async (sessionId, opts) => {
 		const db = await getDb();
 		try {
+			const resolved = await resolveSessionId(db, sessionId);
+			if (!resolved) return;
+
 			const [session] = await all(
 				db,
-				"SELECT * FROM session WHERE id = ? OR id LIKE ?",
-				sessionId,
-				`${sessionId}%`,
+				"SELECT * FROM session WHERE id = ?",
+				resolved,
 			);
 			if (!session) {
 				console.error(`Session not found: ${sessionId}`);
 				process.exit(1);
 			}
 
+			const s = session as Record<string, unknown>;
+
 			const analysis = await all(
 				db,
 				"SELECT * FROM analysis WHERE session_id = ?",
-				(session as Record<string, unknown>).id,
+				s.id,
 			);
 			const subagents = await all(
 				db,
 				"SELECT id, title, message_count, turn_count FROM session WHERE parent_id = ?",
-				(session as Record<string, unknown>).id,
+				s.id,
 			);
 			const toolStats = await all(
 				db,
 				`SELECT tool_name, COUNT(*) as count, SUM(CASE WHEN is_error THEN 1 ELSE 0 END) as errors
          FROM tool_call WHERE session_id = ? GROUP BY tool_name ORDER BY count DESC`,
-				(session as Record<string, unknown>).id,
+				s.id,
 			);
 
 			if (opts.json) {
@@ -45,10 +51,13 @@ export const showCommand = new Command("show")
 					),
 				);
 			} else {
-				const s = session as Record<string, unknown>;
+				const projectDisplay =
+					extractProjectName(s.project_path as string | null) ??
+					(s.project_name as string | null) ??
+					"unknown";
 				console.log(`Session: ${s.id}`);
 				console.log(`Source: ${s.source}`);
-				console.log(`Project: ${s.project_name ?? "unknown"}`);
+				console.log(`Project: ${projectDisplay}`);
 				console.log(`Branch: ${s.git_branch ?? "unknown"}`);
 				console.log(`Started: ${s.started_at}`);
 				console.log(`Duration: ${s.duration_s}s`);

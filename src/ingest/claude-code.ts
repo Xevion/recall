@@ -1,5 +1,6 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, run } from "../db/index";
+import { extractProjectName } from "../utils/path";
 import type { IngestOptions, IngestResult } from "./index";
 import { persistSession } from "./persist";
 import type {
@@ -268,19 +269,14 @@ async function parseClaudeCodeSession(
 		(endedAt.getTime() - startedAt.getTime()) / 1000,
 	);
 
-	// Derive project name from path
-	const pathParts = filePath.split("/");
-	const projectIdx = pathParts.indexOf("projects");
-	const projectDir = projectIdx >= 0 ? pathParts[projectIdx + 1] : null;
-	const projectName = projectDir
-		? projectDir.replace(/^-/, "").replace(/-/g, "/")
-		: null;
+	const projectPath = (metaEvent.cwd as string) ?? null;
+	const projectName = extractProjectName(projectPath);
 
 	return {
 		id: sessionId,
 		source: "claude-code",
 		parentId: parentId ?? null,
-		projectPath: (metaEvent.cwd as string) ?? null,
+		projectPath,
 		projectName,
 		gitBranch: (metaEvent.gitBranch as string) ?? null,
 		title: null,

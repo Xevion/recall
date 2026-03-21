@@ -1,6 +1,7 @@
 import { Database as SQLiteDB } from "bun:sqlite";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, run } from "../db/index";
+import { extractProjectName } from "../utils/path";
 import type { IngestOptions, IngestResult } from "./index";
 import { persistSession } from "./persist";
 import type {
@@ -225,8 +226,7 @@ function parseOpenCodeSession(
 		source: "opencode",
 		parentId,
 		projectPath: ocSession.directory || null,
-		projectName:
-			ocSession.project_id === "global" ? null : ocSession.project_id,
+		projectName: extractProjectName(ocSession.directory || null),
 		gitBranch: null,
 		title: ocSession.title || null,
 		startedAt: new Date(ocSession.time_created),

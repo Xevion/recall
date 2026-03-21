@@ -1,5 +1,33 @@
+import Table from "cli-table3";
 import { Command } from "commander";
 import { all, close, getDb } from "../db/index";
+import { extractProjectName } from "../utils/path";
+import { BORDERLESS_CHARS, c } from "../utils/theme";
+
+function formatTokens(n: number): string {
+	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+	return String(n);
+}
+
+function formatDuration(seconds: number): string {
+	if (seconds < 60) return `${seconds}s`;
+	const m = Math.floor(seconds / 60);
+	if (m < 60) return `${m}m`;
+	const h = Math.floor(m / 60);
+	const rm = m % 60;
+	return `${h}h${rm > 0 ? ` ${rm}m` : ""}`;
+}
+
+function formatDate(iso: string): string {
+	const d = new Date(iso);
+	const now = new Date();
+	const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+	if (diffDays === 0) return "Today";
+	if (diffDays === 1) return "Yesterday";
+	if (diffDays < 7) return `${diffDays}d ago`;
+	return d.toLocaleDateString();
+}
 
 export const projectsCommand = new Command("projects")
 	.description("Project-level activity summary")
@@ -15,43 +43,121 @@ export const projectsCommand = new Command("projects")
 					tokens: "total_tokens DESC",
 				}[opts.sort as string] ?? "last_active DESC";
 
-			const results = await all(
+			const rows = await all<{
+				project_path: string;
+				session_count: number;
+				total_tokens: number;
+				total_duration_s: number;
+				last_active: string;
+				first_active: string;
+			}>(
 				db,
 				`SELECT
-           project_name,
+           project_path,
            COUNT(*) as session_count,
            SUM(token_input + token_output) as total_tokens,
            SUM(duration_s) as total_duration_s,
            MAX(started_at) as last_active,
            MIN(started_at) as first_active
          FROM session
-         WHERE project_name IS NOT NULL AND parent_id IS NULL
-         GROUP BY project_name
+         WHERE project_path IS NOT NULL AND parent_id IS NULL
+         GROUP BY project_path
          ORDER BY ${orderBy}`,
 			);
 
-			if (opts.json) {
-				console.log(JSON.stringify(results, null, 2));
-			} else {
-				console.log(
-					["Project", "Sessions", "Tokens", "Duration", "Last Active"]
-						.map((h) => h.padEnd(20))
-						.join(""),
-				);
-				console.log("-".repeat(100));
-				for (const r of results as Array<Record<string, unknown>>) {
-					console.log(
-						[
-							String(r.project_name).slice(0, 18),
-							String(r.session_count),
-							String(r.total_tokens),
-							`${Math.round((r.total_duration_s as number) / 60)}m`,
-							new Date(r.last_active as string).toLocaleDateString(),
-						]
-							.map((v) => v.padEnd(20))
-							.join(""),
-					);
+			// Derive display names and merge rows that map to the same name
+			const merged = new Map<
+				string,
+				{
+					sessions: number;
+					tokens: number;
+					duration: number;
+					lastActive: string;
 				}
+			>();
+			for (const r of rows) {
+				const name = extractProjectName(r.project_path) ?? r.project_path;
+				const existing = merged.get(name);
+				if (existing) {
+					existing.sessions += r.session_count;
+					existing.tokens += r.total_tokens;
+					existing.duration += r.total_duration_s;
+					if (r.last_active > existing.lastActive)
+						existing.lastActive = r.last_active;
+				} else {
+					merged.set(name, {
+						sessions: r.session_count,
+						tokens: r.total_tokens,
+						duration: r.total_duration_s,
+						lastActive: r.last_active,
+					});
+				}
+			}
+
+			// Re-sort merged results
+			const sortFn =
+				{
+					recent: (
+						a: [string, { lastActive: string }],
+						b: [string, { lastActive: string }],
+					) => b[1].lastActive.localeCompare(a[1].lastActive),
+					sessions: (
+						a: [string, { sessions: number }],
+						b: [string, { sessions: number }],
+					) => b[1].sessions - a[1].sessions,
+					tokens: (
+						a: [string, { tokens: number }],
+						b: [string, { tokens: number }],
+					) => b[1].tokens - a[1].tokens,
+				}[opts.sort as string] ?? undefined;
+
+			const entries = [...merged.entries()];
+			if (sortFn)
+				entries.sort(
+					sortFn as (a: [string, unknown], b: [string, unknown]) => number,
+				);
+
+			if (opts.json) {
+				const jsonResults = entries.map(([name, data]) => ({
+					project_name: name,
+					session_count: data.sessions,
+					total_tokens: data.tokens,
+					total_duration_s: data.duration,
+					last_active: data.lastActive,
+				}));
+				console.log(JSON.stringify(jsonResults, null, 2));
+			} else {
+				const table = new Table({
+					head: [
+						"Project",
+						"Sessions",
+						"Tokens",
+						"Duration",
+						"Last Active",
+					].map((h) => c.text.bold(h)),
+					colAligns: ["left", "right", "right", "right", "left"],
+					colWidths: [30, 10, 10, 10, 14],
+					style: {
+						head: [],
+						border: [],
+						"padding-left": 0,
+						"padding-right": 0,
+					},
+					chars: BORDERLESS_CHARS,
+				});
+
+				for (const [name, data] of entries) {
+					table.push([
+						c.catBlue(name),
+						c.text(String(data.sessions)),
+						c.subtext0(formatTokens(data.tokens)),
+						c.overlay1(formatDuration(data.duration)),
+						formatDate(data.lastActive),
+					]);
+				}
+
+				console.log(table.toString());
+				console.log(c.overlay1(`\n${entries.length} project(s)`));
 			}
 		} finally {
 			await close();

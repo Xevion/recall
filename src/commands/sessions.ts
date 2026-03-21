@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { close, getDb } from "../db/index";
 import type { SessionRow } from "../db/queries";
 import { listSessions } from "../db/queries";
+import { extractProjectName } from "../utils/path";
 import { BORDERLESS_CHARS, c } from "../utils/theme";
 
 const VALID_SORT_FIELDS = ["started", "duration", "turns", "messages"];
@@ -146,11 +147,7 @@ function formatDate(iso: string, wide: boolean): string {
 }
 
 function projectDisplay(row: SessionRow): string {
-	const raw = row.project_name ?? row.project_path;
-	if (!raw) return "—";
-	const cleaned = raw.replace(/\/+$/, "");
-	const parts = cleaned.split("/");
-	return parts[parts.length - 1] || cleaned;
+	return extractProjectName(row.project_path) ?? row.project_name ?? "—";
 }
 
 function buildRow(s: SessionRow, wide: boolean): string[] {
@@ -160,8 +157,9 @@ function buildRow(s: SessionRow, wide: boolean): string[] {
 	const msgs = String(s.message_count ?? 0);
 	const turns = String(s.turn_count ?? 0);
 
+	const idDisplay = wide ? s.id : s.id.slice(0, 14);
 	const row = [
-		c.overlay0(s.id.slice(0, 14)),
+		c.overlay0(idDisplay),
 		colorSource(s.source),
 		colorProject(proj),
 		colorStarted(s.started_at, date),
@@ -204,7 +202,9 @@ function renderTable(sessions: SessionRow[], wide: boolean): void {
 		"right",
 		"left",
 	];
-	const colWidths = [16, 13, 18, 18, 10, 7, 10, 14];
+	const colWidths = wide
+		? [38, 13, 18, 24, 10, 7, 10, 14]
+		: [16, 13, 18, 18, 10, 7, 10, 14];
 
 	if (wide) {
 		head.push("Summary");

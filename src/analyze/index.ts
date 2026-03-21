@@ -12,7 +12,9 @@ const ajv = new Ajv();
 const validateAnalysisOutput = ajv.compile<AnalysisOutput>(analysisSchema);
 
 /** Strip $schema directive — the SDK doesn't support it and may silently fall back to prose */
-function stripSchemaDirective(schema: Record<string, unknown>): Record<string, unknown> {
+function stripSchemaDirective(
+	schema: Record<string, unknown>,
+): Record<string, unknown> {
 	const { $schema: _, ...rest } = schema;
 	return rest;
 }

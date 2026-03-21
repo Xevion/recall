@@ -51,3 +51,24 @@ recall <command>                  # after bun build --compile
 - OpenCode session IDs are prefixed with `oc-` to avoid collisions
 - Subagents are sessions with `parent_id` set; metadata in `subagent` table
 - Research artifacts auto-extracted from subagents matching prompt signal patterns
+- Ingest is idempotent via `ingest_log` (keyed on `source_path` + `file_mtime` for claude-code, `session_id` for opencode)
+- Subagent metadata read from `.meta.json` companion files alongside JSONL (claude-code only)
+
+## Linear Issue Tracking
+
+Recall tracks work in [Linear](https://linear.app/xevion-personal/project/recall-92d9d103e6a8) under the **Recall** project.
+
+- **Team:** `Xevion's Personal`
+- **Project:** `Recall` — filter by this when querying issues
+- **Issue prefix:** `XEV-` (team-level — all projects under this team share it)
+
+### Labels
+
+**Domain:** Ingest, Analysis, CLI
+**Type:** Bug, Feature, Improvement, Refactoring, Documentation, Testing
+
+### Working with Issues
+
+Use the `linear-issue` skill for creating issues, or reference issues directly (e.g., "work on XEV-###").
+
+**Always move issues to "In Progress" before writing code. Do NOT mark "Done" until confirmed.**

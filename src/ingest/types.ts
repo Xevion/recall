@@ -45,6 +45,7 @@ export interface NormalizedToolCall {
 export interface NormalizedSubagent {
 	sessionId: string;
 	agentType: string | null;
+	description: string | null;
 	slug: string | null;
 	prompt: string | null;
 	result: string | null;

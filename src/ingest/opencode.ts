@@ -177,6 +177,7 @@ function parseOpenCodeSession(
 		subagent = {
 			sessionId,
 			agentType: null,
+			description: null,
 			slug: null,
 			prompt: firstUserMsg?.content ?? null,
 			result: lastAssistantMsg?.content ?? null,

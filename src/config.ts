@@ -116,7 +116,10 @@ export async function loadConfig(): Promise<RecallConfig> {
 		const text = await file.text();
 		const parsed = parse(text) as unknown as Partial<RecallConfig>;
 		// Deep merge with defaults
-		_config = deepMerge(DEFAULT_CONFIG, parsed) as RecallConfig;
+		_config = deepMerge(
+			DEFAULT_CONFIG as unknown as Record<string, unknown>,
+			parsed as unknown as Record<string, unknown>,
+		) as unknown as RecallConfig;
 	} else {
 		_config = DEFAULT_CONFIG;
 	}

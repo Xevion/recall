@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
+import { close } from "./db/index";
 import { analyzeCommand } from "./commands/analyze";
 import { frustrationsCommand } from "./commands/frustrations";
 import { ingestCommand } from "./commands/ingest";
@@ -26,5 +27,14 @@ program.addCommand(frustrationsCommand);
 program.addCommand(researchCommand);
 program.addCommand(projectsCommand);
 program.addCommand(statsCommand);
+
+// Graceful shutdown: close the DuckDB connection before exit.
+async function shutdown(): Promise<void> {
+	await close();
+	process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 program.parse();

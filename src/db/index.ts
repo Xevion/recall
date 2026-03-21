@@ -1,17 +1,10 @@
 import { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
-import { resolve } from "node:path";
 import { loadConfig } from "../config";
+import { expandPath } from "../utils/path";
 import { initSchema } from "./schema";
 
 let _instance: DuckDBInstance | null = null;
 let _conn: DuckDBConnection | null = null;
-
-export function expandPath(p: string): string {
-	if (p.startsWith("~/")) {
-		return resolve(process.env.HOME!, p.slice(2));
-	}
-	return resolve(p);
-}
 
 export async function getConnection(): Promise<DuckDBConnection> {
 	if (_conn) return _conn;

@@ -202,6 +202,7 @@ async function parseClaudeCodeSession(
 		subagent = {
 			sessionId,
 			agentType: (firstEvent.agentType as string) ?? null,
+			description: null, // populated from .meta.json in Phase 4
 			slug: (firstEvent.slug as string) ?? null,
 			prompt: firstUserMsg?.content ?? null,
 			result: lastAssistantMsg?.content ?? null,

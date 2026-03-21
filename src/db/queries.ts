@@ -127,7 +127,7 @@ export async function resolveSessionId(
 		"SELECT id FROM session WHERE id = ?",
 		partial,
 	);
-	if (exact.length === 1) return exact[0]!.id;
+	if (exact.length === 1) return (exact[0] as { id: string }).id;
 
 	// Prefix match
 	const matches = await all<{ id: string; source: string; started_at: string }>(
@@ -140,7 +140,7 @@ export async function resolveSessionId(
 		throw new ValidationError(`No session found matching: ${partial}`);
 	}
 
-	if (matches.length === 1) return matches[0]!.id;
+	if (matches.length === 1) return (matches[0] as { id: string }).id;
 
 	if (matches.length <= 5) {
 		const lines = matches.map((m) => `  ${m.id}  ${m.source}  ${m.started_at}`);
@@ -458,7 +458,7 @@ export async function searchSessions(
 	// Determine sort: if sortBy is explicitly given, use it; otherwise sort by relevance
 	let orderClause: string;
 	if (opts.sortBy && SORT_COLUMNS[opts.sortBy]) {
-		const sortCol = SORT_COLUMNS[opts.sortBy]!;
+		const sortCol = SORT_COLUMNS[opts.sortBy];
 		const sortDir = opts.sortDir ?? "desc";
 		orderClause = `ORDER BY ${sortCol} ${sortDir} NULLS LAST`;
 	} else {

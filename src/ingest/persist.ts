@@ -1,10 +1,6 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { withTransaction } from "../db/index";
-import type {
-	NormalizedMessage,
-	NormalizedSession,
-	NormalizedToolCall,
-} from "./types";
+import type { NormalizedSession } from "./types";
 
 const MSG_SQL = `INSERT OR REPLACE INTO message
 	(id, session_id, role, model, seq, timestamp, token_input, token_output,

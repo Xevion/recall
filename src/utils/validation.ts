@@ -39,7 +39,7 @@ export function resolveEnumOption<T extends string>(
 	const prefixMatches = allowed.filter((a) =>
 		a.toLowerCase().startsWith(lower),
 	);
-	if (prefixMatches.length === 1) return prefixMatches[0]!;
+	if (prefixMatches.length === 1) return prefixMatches[0] as T;
 	if (prefixMatches.length > 1) {
 		throw new ValidationError(
 			`--${optionName} "${value}" is ambiguous: ${prefixMatches.join(", ")}`,
@@ -101,8 +101,8 @@ export function parseRelativeDate(value: string, optionName = "since"): string {
 
 	const match = RELATIVE_DATE_RE.exec(lower);
 	if (match) {
-		const amount = Number.parseInt(match[1]!, 10);
-		const unit = match[2]!;
+		const amount = Number.parseInt(match[1] ?? "", 10);
+		const unit = match[2] ?? "";
 		const d = new Date(now);
 		switch (unit) {
 			case "d":

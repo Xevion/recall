@@ -162,7 +162,8 @@ async function parseClaudeCodeSession(
 		// Check if this event should merge into an existing message
 		const existingIdx = msgId != null ? messageById.get(msgId) : undefined;
 		if (existingIdx != null && existingIdx < messages.length) {
-			const existing = messages[existingIdx]!;
+			const existing = messages[existingIdx];
+			if (!existing) continue;
 			// Merge content blocks into the existing message
 			if (Array.isArray(contentBlocks)) {
 				const extraContent = processContentBlocks(

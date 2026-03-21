@@ -18,7 +18,9 @@ export const frustrationsCommand = new Command("frustrations")
 
 		await withDb(async (db) => {
 			const conditions = [
-				"a.status = 'complete'",
+				opts.includeRefused
+					? "a.status IN ('complete', 'refused')"
+					: "a.status = 'complete'",
 				"array_length(a.frustrations) > 0",
 			];
 			const params: unknown[] = [];

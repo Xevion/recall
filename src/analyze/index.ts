@@ -153,7 +153,8 @@ export async function analyze(
 			break;
 		}
 
-		const chunk = chunks[i]!;
+		const chunk = chunks[i];
+		if (!chunk) continue;
 		const results = await Promise.all(
 			chunk.map((session) =>
 				analyzeSession(db, session.id, session.parent_id, config),

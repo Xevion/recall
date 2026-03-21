@@ -1,5 +1,7 @@
 import { Command } from "commander";
+import { ftsIndexesExist } from "../db/fts";
 import { all, withDb } from "../db/index";
+import { escapeLike } from "../db/queries";
 import { parseIntOption } from "../utils/validation";
 
 interface ResearchRow {
@@ -8,6 +10,7 @@ interface ResearchRow {
 	tags: string[];
 	created_at: string;
 	content_length: number;
+	score: number | null;
 }
 
 export const researchCommand = new Command("research")
@@ -24,20 +27,35 @@ export const researchCommand = new Command("research")
 			let results: ResearchRow[];
 
 			if (opts.topic) {
-				results = await all<ResearchRow>(
-					db,
-					`SELECT id, topic, tags, created_at, length(content) as content_length
-           FROM research_artifact
-           WHERE topic ILIKE ? OR content ILIKE ?
-           ORDER BY created_at DESC LIMIT ?`,
-					`%${opts.topic}%`,
-					`%${opts.topic}%`,
-					limit,
-				);
+				const hasFts = await ftsIndexesExist(db);
+				if (hasFts) {
+					results = await all<ResearchRow>(
+						db,
+						`SELECT id, topic, tags, created_at, length(content) as content_length, score
+						 FROM (SELECT *, fts_main_research_artifact.match_bm25(id, ?) AS score FROM research_artifact)
+						 WHERE score IS NOT NULL
+						 ORDER BY score
+						 LIMIT ?`,
+						opts.topic,
+						limit,
+					);
+				} else {
+					const pattern = `%${escapeLike(opts.topic)}%`;
+					results = await all<ResearchRow>(
+						db,
+						`SELECT id, topic, tags, created_at, length(content) as content_length, NULL as score
+						 FROM research_artifact
+						 WHERE topic ILIKE ? OR content ILIKE ?
+						 ORDER BY created_at DESC LIMIT ?`,
+						pattern,
+						pattern,
+						limit,
+					);
+				}
 			} else if (opts.tags) {
 				results = await all<ResearchRow>(
 					db,
-					`SELECT id, topic, tags, created_at, length(content) as content_length
+					`SELECT id, topic, tags, created_at, length(content) as content_length, NULL as score
            FROM research_artifact
            WHERE list_contains(tags, ?)
            ORDER BY created_at DESC LIMIT ?`,
@@ -47,7 +65,7 @@ export const researchCommand = new Command("research")
 			} else {
 				results = await all<ResearchRow>(
 					db,
-					`SELECT id, topic, tags, created_at, length(content) as content_length
+					`SELECT id, topic, tags, created_at, length(content) as content_length, NULL as score
            FROM research_artifact
            ORDER BY created_at DESC LIMIT ?`,
 					limit,

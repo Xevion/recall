@@ -1,8 +1,12 @@
 import Table from "cli-table3";
 import { Command } from "commander";
 import { withDb } from "../db/index";
-import type { SessionRow } from "../db/queries";
-import { getAvailableProjects, listSessions } from "../db/queries";
+import type { SessionRow, SessionSearchRow } from "../db/queries";
+import {
+	getAvailableProjects,
+	listSessions,
+	searchSessions,
+} from "../db/queries";
 import { formatDate, formatDuration } from "../utils/format";
 import { extractProjectName } from "../utils/path";
 import { BORDERLESS_CHARS, c } from "../utils/theme";
@@ -129,7 +133,28 @@ function projectDisplay(row: SessionRow): string {
 	return extractProjectName(row.project_path) ?? row.project_name ?? "—";
 }
 
-function buildRow(s: SessionRow, wide: boolean): string[] {
+function normalizeRelevance(sessions: SessionSearchRow[]): Map<string, number> {
+	const scores = sessions.map((s) => s.relevance).filter((s) => s != null);
+	const result = new Map<string, number>();
+	if (scores.length === 0) return result;
+	const min = Math.min(...scores);
+	const max = Math.max(...scores);
+	const range = max - min;
+	for (const s of sessions) {
+		if (s.relevance != null) {
+			const pct =
+				range === 0 ? 100 : Math.round(((max - s.relevance) / range) * 100);
+			result.set(s.id, pct);
+		}
+	}
+	return result;
+}
+
+function buildRow(
+	s: SessionRow,
+	wide: boolean,
+	relevancePct?: number,
+): string[] {
 	const proj = projectDisplay(s);
 	const date = formatDate(s.started_at, wide);
 	const dur = formatDuration(s.duration_s);
@@ -148,6 +173,10 @@ function buildRow(s: SessionRow, wide: boolean): string[] {
 		colorStatus(s.analysis_status),
 	];
 
+	if (relevancePct != null) {
+		row.push(c.catGreen(`${relevancePct}%`));
+	}
+
 	if (wide) {
 		const summary = s.summary
 			? s.summary.length > 48
@@ -160,7 +189,12 @@ function buildRow(s: SessionRow, wide: boolean): string[] {
 	return row;
 }
 
-function renderTable(sessions: SessionRow[], wide: boolean): void {
+function renderTable(
+	sessions: SessionRow[],
+	wide: boolean,
+	relevanceMap?: Map<string, number>,
+): void {
+	const hasRelevance = relevanceMap && relevanceMap.size > 0;
 	const head = [
 		"ID",
 		"Source",
@@ -185,6 +219,12 @@ function renderTable(sessions: SessionRow[], wide: boolean): void {
 		? [38, 13, 18, 24, 10, 7, 10, 14]
 		: [16, 13, 18, 18, 10, 7, 10, 14];
 
+	if (hasRelevance) {
+		head.push("Rel");
+		colAligns.push("right");
+		colWidths.push(6);
+	}
+
 	if (wide) {
 		head.push("Summary");
 		colAligns.push("left");
@@ -206,7 +246,8 @@ function renderTable(sessions: SessionRow[], wide: boolean): void {
 	}
 
 	for (const s of sessions) {
-		table.push(buildRow(s, wide));
+		const pct = hasRelevance ? relevanceMap.get(s.id) : undefined;
+		table.push(buildRow(s, wide, pct));
 	}
 
 	console.log(table.toString());
@@ -215,6 +256,10 @@ function renderTable(sessions: SessionRow[], wide: boolean): void {
 
 export const sessionsCommand = new Command("sessions")
 	.description("List sessions")
+	.option(
+		"-q, --query <text>",
+		"Full-text search across messages and summaries",
+	)
 	.option("-p, --project <name>", "Filter by project name")
 	.option("-s, --source <type>", "Filter by source (claude-code, opencode)")
 	.option("--since <date>", "Sessions after this date")
@@ -263,31 +308,44 @@ export const sessionsCommand = new Command("sessions")
 			? parseIntOption(opts.minMessages, "min-messages")
 			: undefined;
 
-		await withDb(async (db) => {
-			const sessions = await listSessions(db, {
-				project: opts.project,
-				source,
-				since,
-				limit,
-				status,
-				minTurns,
-				minDuration,
-				minMessages,
-				sortBy: sortField,
-				sortDir,
-			});
+		const listOpts = {
+			project: opts.project,
+			source,
+			since,
+			limit,
+			status,
+			minTurns,
+			minDuration,
+			minMessages,
+			sortBy: sortField,
+			sortDir,
+		};
 
-			if (opts.json) {
-				console.log(JSON.stringify(sessions, null, 2));
+		await withDb(async (db) => {
+			if (opts.query) {
+				const results = await searchSessions(db, opts.query, listOpts);
+				const relevanceMap = normalizeRelevance(results);
+
+				if (opts.json) {
+					console.log(JSON.stringify(results, null, 2));
+				} else {
+					renderTable(results, !!opts.wide, relevanceMap);
+				}
 			} else {
-				renderTable(sessions, !!opts.wide);
-				if (sessions.length === 0 && opts.project) {
-					const available = await getAvailableProjects(db);
-					const suggestions = suggestProject(opts.project, available);
-					if (suggestions.length > 0) {
-						console.log(
-							c.overlay1(`  Did you mean: ${suggestions.join(", ")}?`),
-						);
+				const sessions = await listSessions(db, listOpts);
+
+				if (opts.json) {
+					console.log(JSON.stringify(sessions, null, 2));
+				} else {
+					renderTable(sessions, !!opts.wide);
+					if (sessions.length === 0 && opts.project) {
+						const available = await getAvailableProjects(db);
+						const suggestions = suggestProject(opts.project, available);
+						if (suggestions.length > 0) {
+							console.log(
+								c.overlay1(`  Did you mean: ${suggestions.join(", ")}?`),
+							);
+						}
 					}
 				}
 			}

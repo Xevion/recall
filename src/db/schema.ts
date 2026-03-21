@@ -12,6 +12,9 @@ async function enumExists(
 }
 
 export async function initSchema(conn: DuckDBConnection): Promise<void> {
+	await conn.run("INSTALL fts");
+	await conn.run("LOAD fts");
+
 	// DuckDB does not support CREATE TYPE IF NOT EXISTS — check catalog first.
 	if (!(await enumExists(conn, "source_type"))) {
 		await conn.run(

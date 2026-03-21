@@ -1,5 +1,7 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadConfig } from "../config";
+import { rebuildFtsIndexes } from "../db/fts";
+import { debug } from "../utils/logger";
 import { ingestClaudeCode } from "./claude-code";
 import { ingestOpenCode } from "./opencode";
 
@@ -46,6 +48,15 @@ export async function ingest(
 			opts,
 		);
 		results.push(result);
+	}
+
+	const totalIngested = results.reduce((s, r) => s + r.sessionsIngested, 0);
+	if (totalIngested > 0) {
+		debug("ingest: rebuilding FTS indexes after ingest");
+		const start = performance.now();
+		await rebuildFtsIndexes(conn);
+		const elapsed = Math.round(performance.now() - start);
+		debug(`ingest: FTS indexes rebuilt in ${elapsed}ms`);
 	}
 
 	return results;

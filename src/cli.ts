@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { analyzeCommand } from "./commands/analyze";
 import { frustrationsCommand } from "./commands/frustrations";
+import { ftsCommand } from "./commands/fts";
 import { ingestCommand } from "./commands/ingest";
 import { projectsCommand } from "./commands/projects";
 import { researchCommand } from "./commands/research";
@@ -31,6 +32,7 @@ const program = new Command()
 
 program.addCommand(ingestCommand);
 program.addCommand(analyzeCommand);
+program.addCommand(ftsCommand);
 program.addCommand(sessionsCommand);
 program.addCommand(showCommand);
 program.addCommand(searchCommand);

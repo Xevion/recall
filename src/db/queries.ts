@@ -5,52 +5,94 @@ export interface SessionRow {
 	id: string;
 	source: string;
 	parent_id: string | null;
+	project_path: string | null;
 	project_name: string | null;
 	title: string | null;
 	started_at: string;
+	ended_at: string | null;
 	message_count: number;
 	turn_count: number;
 	token_input: number;
 	token_output: number;
 	duration_s: number;
+	analysis_status: string | null;
+	summary: string | null;
+}
+
+const SORT_COLUMNS: Record<string, string> = {
+	started: "s.started_at",
+	duration: "s.duration_s",
+	turns: "s.turn_count",
+	messages: "s.message_count",
+};
+
+export interface ListSessionsOpts {
+	project?: string;
+	source?: string;
+	since?: string;
+	limit?: number;
+	status?: string;
+	minTurns?: number;
+	minDuration?: number;
+	minMessages?: number;
+	sortBy?: string;
+	sortDir?: "asc" | "desc";
 }
 
 export async function listSessions(
 	db: DuckDBConnection,
-	opts: {
-		project?: string;
-		source?: string;
-		since?: string;
-		limit?: number;
-	},
+	opts: ListSessionsOpts,
 ): Promise<SessionRow[]> {
-	const conditions: string[] = ["parent_id IS NULL"]; // exclude subagents from top-level list
+	const conditions: string[] = ["s.parent_id IS NULL"];
 	const params: unknown[] = [];
 
 	if (opts.project) {
-		conditions.push("project_name ILIKE ?");
+		conditions.push("s.project_name ILIKE ?");
 		params.push(`%${opts.project}%`);
 	}
 	if (opts.source) {
-		conditions.push("source = ?");
+		conditions.push("s.source = ?");
 		params.push(opts.source);
 	}
 	if (opts.since) {
-		conditions.push("started_at >= ?");
+		conditions.push("s.started_at >= ?");
 		params.push(opts.since);
+	}
+	if (opts.status) {
+		conditions.push("a.status = ?");
+		params.push(opts.status);
+	}
+	if (opts.minTurns != null) {
+		conditions.push("s.turn_count >= ?");
+		params.push(opts.minTurns);
+	}
+	if (opts.minDuration != null) {
+		conditions.push("s.duration_s >= ?");
+		params.push(opts.minDuration);
+	}
+	if (opts.minMessages != null) {
+		conditions.push("s.message_count >= ?");
+		params.push(opts.minMessages);
 	}
 
 	const where =
 		conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 	const limit = opts.limit ?? 20;
 
+	const sortCol = SORT_COLUMNS[opts.sortBy ?? "started"] ?? "s.started_at";
+	const sortDir = opts.sortDir ?? "desc";
+
 	return all<SessionRow>(
 		db,
-		`SELECT id, source, parent_id, project_name, title, started_at,
-            message_count, turn_count, token_input, token_output, duration_s
-     FROM session ${where}
-     ORDER BY started_at DESC
-     LIMIT ?`,
+		`SELECT s.id, s.source, s.parent_id, s.project_path, s.project_name,
+		        s.title, s.started_at, s.ended_at,
+		        s.message_count, s.turn_count, s.token_input, s.token_output,
+		        s.duration_s, a.status AS analysis_status, a.summary
+		 FROM session s
+		 LEFT JOIN analysis a ON a.session_id = s.id
+		 ${where}
+		 ORDER BY ${sortCol} ${sortDir} NULLS LAST
+		 LIMIT ?`,
 		...params,
 		limit,
 	);

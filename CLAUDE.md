@@ -15,6 +15,17 @@ Two-phase pipeline:
 - **Config**: TOML at `~/.local/share/recall/config.toml`
 - **AI**: `@anthropic-ai/claude-agent-sdk` with JSON schema output
 - **CLI**: Commander
+- **Tooling**: mise (`mise.toml` manages duckdb binary)
+
+## Database Queries (Ad-hoc)
+
+For ad-hoc DB queries outside of application code, use the duckdb CLI binary managed by mise:
+
+```bash
+mise exec -- duckdb ~/.local/share/recall/recall.db "SELECT ..."
+```
+
+Do NOT write temp bun/ts scripts to query the database. The duckdb binary is faster and avoids Node API compatibility issues.
 
 ## Commands
 

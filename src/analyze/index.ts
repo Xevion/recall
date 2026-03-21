@@ -1,11 +1,15 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { DuckDBConnection } from "@duckdb/node-api";
+import Ajv from "ajv/dist/2020";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
 import { debug, error as logError, trace, warn } from "../utils/logger";
 import { buildAnalysisPrompt } from "./prompt";
 import { type AnalysisOutput, analysisSchema } from "./schema";
 import { type TriageInput, triageSession } from "./triage";
+
+const ajv = new Ajv();
+const validateAnalysisOutput = ajv.compile<AnalysisOutput>(analysisSchema);
 
 export interface AnalyzeOptions {
 	limit?: number;
@@ -203,7 +207,7 @@ async function analyzeSession(
 				thinking: { type: "disabled" },
 				persistSession: false,
 				settingSources: [],
-				maxTurns: 2,
+				maxTurns: 4,
 				effort: "low",
 				outputFormat: {
 					type: "json_schema",
@@ -258,6 +262,10 @@ async function analyzeSession(
 					);
 				}
 			}
+		}
+
+		if (!output && rawResultText) {
+			output = tryExtractAnalysisOutput(rawResultText, sessionId);
 		}
 
 		if (!output) {
@@ -334,6 +342,49 @@ async function analyzeSession(
 		}
 		return "error";
 	}
+}
+
+/**
+ * Fallback: extract and validate analysis JSON from raw result text.
+ * Handles responses where the model emitted JSON as text (possibly code-fenced)
+ * instead of calling the SDK's StructuredOutput tool.
+ */
+export function tryExtractAnalysisOutput(
+	raw: string,
+	sessionId: string,
+): AnalysisOutput | null {
+	// Strip markdown code fences if present
+	const stripped = raw
+		.replace(/^```(?:json)?\s*\n?/m, "")
+		.replace(/\n?```\s*$/m, "");
+
+	// Try to extract a JSON object
+	const jsonMatch = stripped.match(/\{[\s\S]*\}/);
+	if (!jsonMatch) {
+		debug(`session ${sessionId}: fallback — no JSON object found in raw text`);
+		return null;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(jsonMatch[0]);
+	} catch {
+		debug(`session ${sessionId}: fallback — JSON.parse failed`);
+		return null;
+	}
+
+	if (validateAnalysisOutput(parsed)) {
+		debug(
+			`session ${sessionId}: fallback — valid analysis extracted from raw text (${(parsed as AnalysisOutput).topics.length} topics)`,
+		);
+		return parsed;
+	}
+
+	const errors = validateAnalysisOutput.errors
+		?.map((e) => `${e.instancePath || "root"}: ${e.message}`)
+		.join(", ");
+	debug(`session ${sessionId}: fallback — schema validation failed: ${errors}`);
+	return null;
 }
 
 function chunkArray<T>(arr: T[], size: number): T[][] {

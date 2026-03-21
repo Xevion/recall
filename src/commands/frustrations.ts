@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { all, close, getDb } from "../db/index";
-import { getAvailableProjects } from "../db/queries";
+import { all, withDb } from "../db/index";
+import { escapeLike, getAvailableProjects } from "../db/queries";
 import { extractProjectName } from "../utils/path";
 import { c } from "../utils/theme";
 import { parseRelativeDate, suggestProject } from "../utils/validation";
@@ -14,8 +14,7 @@ export const frustrationsCommand = new Command("frustrations")
 	.action(async (opts) => {
 		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
 
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const conditions = [
 				"a.status = 'complete'",
 				"array_length(a.frustrations) > 0",
@@ -27,8 +26,11 @@ export const frustrationsCommand = new Command("frustrations")
 				params.push(since);
 			}
 			if (opts.project) {
-				conditions.push("(s.project_name ILIKE ? OR s.project_path ILIKE ?)");
-				params.push(`%${opts.project}%`, `%${opts.project}%`);
+				const escaped = escapeLike(opts.project);
+				conditions.push(
+					"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
+				);
+				params.push(`%${escaped}%`, `%${escaped}%`);
 			}
 
 			const query = `
@@ -78,7 +80,5 @@ export const frustrationsCommand = new Command("frustrations")
 					console.log();
 				}
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

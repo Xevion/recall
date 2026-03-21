@@ -1,5 +1,6 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { extractProjectName } from "../utils/path";
+import { ValidationError } from "../utils/validation";
 import { all } from "./index";
 
 export interface SessionRow {
@@ -40,6 +41,10 @@ export interface ListSessionsOpts {
 	sortDir?: "asc" | "desc";
 }
 
+export function escapeLike(s: string): string {
+	return s.replace(/[\\%_]/g, "\\$&");
+}
+
 export async function listSessions(
 	db: DuckDBConnection,
 	opts: ListSessionsOpts,
@@ -48,8 +53,11 @@ export async function listSessions(
 	const params: unknown[] = [];
 
 	if (opts.project) {
-		conditions.push("(s.project_name ILIKE ? OR s.project_path ILIKE ?)");
-		params.push(`%${opts.project}%`, `%${opts.project}%`);
+		const escaped = escapeLike(opts.project);
+		conditions.push(
+			"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
+		);
+		params.push(`%${escaped}%`, `%${escaped}%`);
 	}
 	if (opts.source) {
 		conditions.push("s.source = ?");
@@ -76,8 +84,7 @@ export async function listSessions(
 		params.push(opts.minMessages);
 	}
 
-	const where =
-		conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+	const where = `WHERE ${conditions.join(" AND ")}`;
 	const limit = opts.limit ?? 20;
 
 	const sortCol = SORT_COLUMNS[opts.sortBy ?? "started"] ?? "s.started_at";
@@ -103,14 +110,14 @@ export async function listSessions(
  * Resolve a partial session ID to a full one.
  * - Exact match: returns immediately
  * - Single prefix match: returns that session's ID
- * - 2-5 matches: prints them and exits
- * - 6+ matches: prints the count and exits
- * - No matches: prints error and exits
+ * - 2-5 matches: throws listing them
+ * - 6+ matches: throws asking to be more specific
+ * - No matches: throws error
  */
 export async function resolveSessionId(
 	db: DuckDBConnection,
 	partial: string,
-): Promise<string | null> {
+): Promise<string> {
 	// Try exact match first
 	const exact = await all<{ id: string }>(
 		db,
@@ -127,27 +134,29 @@ export async function resolveSessionId(
 	);
 
 	if (matches.length === 0) {
-		console.error(`No session found matching: ${partial}`);
-		process.exit(1);
+		throw new ValidationError(`No session found matching: ${partial}`);
 	}
 
 	if (matches.length === 1) return matches[0]!.id;
 
 	if (matches.length <= 5) {
-		console.error(
-			`Ambiguous session ID "${partial}" — ${matches.length} matches:`,
+		const lines = matches.map((m) => `  ${m.id}  ${m.source}  ${m.started_at}`);
+		throw new ValidationError(
+			`Ambiguous session ID "${partial}" — ${matches.length} matches:\n${lines.join("\n")}`,
 		);
-		for (const m of matches) {
-			console.error(`  ${m.id}  ${m.source}  ${m.started_at}`);
-		}
-		process.exit(1);
 	}
 
-	// 6+ means our LIMIT 6 query was full — could be even more
-	console.error(
+	throw new ValidationError(
 		`Ambiguous session ID "${partial}" — too many matches (6+). Be more specific.`,
 	);
-	process.exit(1);
+}
+
+export interface ToolStatRow {
+	tool_name: string;
+	call_count: number;
+	error_count: number;
+	avg_duration_ms: number | null;
+	error_rate: number;
 }
 
 export async function getToolStats(
@@ -157,7 +166,7 @@ export async function getToolStats(
 		project?: string;
 		sort?: "frequency" | "errors" | "duration";
 	},
-) {
+): Promise<ToolStatRow[]> {
 	const conditions: string[] = [];
 	const params: unknown[] = [];
 
@@ -166,8 +175,11 @@ export async function getToolStats(
 		params.push(opts.since);
 	}
 	if (opts.project) {
-		conditions.push("(s.project_name ILIKE ? OR s.project_path ILIKE ?)");
-		params.push(`%${opts.project}%`, `%${opts.project}%`);
+		const escaped = escapeLike(opts.project);
+		conditions.push(
+			"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
+		);
+		params.push(`%${escaped}%`, `%${escaped}%`);
 	}
 
 	const where =
@@ -178,7 +190,7 @@ export async function getToolStats(
 		duration: "avg_duration_ms DESC",
 	}[opts.sort ?? "frequency"];
 
-	return all(
+	return all<ToolStatRow>(
 		db,
 		`SELECT
        tc.tool_name,
@@ -206,13 +218,14 @@ export async function searchContent(
 		snippet: string;
 		context: string;
 	}> = [];
-	const pattern = `%${query}%`;
+	const escaped = escapeLike(query);
+	const pattern = `%${escaped}%`;
 
 	if (scope === "summaries" || scope === "all") {
 		const rows = await all<{ session_id: string; summary: string }>(
 			db,
 			`SELECT session_id, summary FROM analysis
-       WHERE summary ILIKE ? AND status = 'complete'
+       WHERE summary ILIKE ? ESCAPE '\\' AND status = 'complete'
        LIMIT 20`,
 			pattern,
 		);
@@ -230,7 +243,7 @@ export async function searchContent(
 		const rows = await all<{ id: string; topic: string; content: string }>(
 			db,
 			`SELECT id, topic, content FROM research_artifact
-       WHERE content ILIKE ? OR topic ILIKE ?
+       WHERE content ILIKE ? ESCAPE '\\' OR topic ILIKE ? ESCAPE '\\'
        LIMIT 20`,
 			pattern,
 			pattern,
@@ -249,7 +262,7 @@ export async function searchContent(
 		const rows = await all<{ id: string; session_id: string; content: string }>(
 			db,
 			`SELECT id, session_id, content FROM message
-       WHERE content ILIKE ?
+       WHERE content ILIKE ? ESCAPE '\\'
        LIMIT 20`,
 			pattern,
 		);

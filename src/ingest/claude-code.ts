@@ -1,6 +1,6 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, run } from "../db/index";
-import { extractProjectName } from "../utils/path";
+import { expandPath, extractProjectName } from "../utils/path";
 import type { IngestOptions, IngestResult } from "./index";
 import { persistSession } from "./persist";
 import type {
@@ -15,7 +15,7 @@ export async function ingestClaudeCode(
 	basePath: string,
 	opts: IngestOptions,
 ): Promise<IngestResult> {
-	const expandedPath = basePath.replace("~", process.env.HOME ?? "");
+	const expandedPath = expandPath(basePath);
 	const result: IngestResult = {
 		source: "claude-code",
 		sessionsIngested: 0,
@@ -54,7 +54,7 @@ export async function ingestClaudeCode(
 			if (session) {
 				await persistSession(db, session);
 				// Also ingest subagent sessions
-				const subagentDir = `${filePath.replace(".jsonl", "")}/subagents`;
+				const subagentDir = `${filePath.replace(/\.jsonl$/, "")}/subagents`;
 				const subGlob = new Bun.Glob("*.jsonl");
 				try {
 					for await (const subPath of subGlob.scan({

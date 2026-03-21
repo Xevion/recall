@@ -1,7 +1,7 @@
 import { Database as SQLiteDB } from "bun:sqlite";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, run } from "../db/index";
-import { extractProjectName } from "../utils/path";
+import { expandPath, extractProjectName } from "../utils/path";
 import type { IngestOptions, IngestResult } from "./index";
 import { persistSession } from "./persist";
 import type {
@@ -16,7 +16,7 @@ export async function ingestOpenCode(
 	dbPath: string,
 	opts: IngestOptions,
 ): Promise<IngestResult> {
-	const expandedPath = dbPath.replace("~", process.env.HOME ?? "");
+	const expandedPath = expandPath(dbPath);
 	const result: IngestResult = {
 		source: "opencode",
 		sessionsIngested: 0,
@@ -52,7 +52,7 @@ export async function ingestOpenCode(
 
 		for (const ocSession of sessions) {
 			try {
-				const sessionId = ocSession.id;
+				const sessionId = `oc-${ocSession.id}`;
 
 				// Check if already ingested
 				if (!opts.force) {

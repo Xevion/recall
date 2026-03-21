@@ -1,36 +1,12 @@
 import Table from "cli-table3";
 import { Command } from "commander";
-import { all, close, getDb } from "../db/index";
+import { all, withDb } from "../db/index";
+import { formatDate, formatDuration, formatTokens } from "../utils/format";
 import { extractProjectName } from "../utils/path";
 import { BORDERLESS_CHARS, c } from "../utils/theme";
 import { resolveEnumOption } from "../utils/validation";
 
 const VALID_SORTS = ["recent", "sessions", "tokens"] as const;
-
-function formatTokens(n: number): string {
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-	return String(n);
-}
-
-function formatDuration(seconds: number): string {
-	if (seconds < 60) return `${seconds}s`;
-	const m = Math.floor(seconds / 60);
-	if (m < 60) return `${m}m`;
-	const h = Math.floor(m / 60);
-	const rm = m % 60;
-	return `${h}h${rm > 0 ? ` ${rm}m` : ""}`;
-}
-
-function formatDate(iso: string): string {
-	const d = new Date(iso);
-	const now = new Date();
-	const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-	if (diffDays === 0) return "Today";
-	if (diffDays === 1) return "Yesterday";
-	if (diffDays < 7) return `${diffDays}d ago`;
-	return d.toLocaleDateString();
-}
 
 export const projectsCommand = new Command("projects")
 	.description("Project-level activity summary")
@@ -39,8 +15,7 @@ export const projectsCommand = new Command("projects")
 	.action(async (opts) => {
 		const sort = resolveEnumOption(opts.sort, VALID_SORTS, "sort");
 
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const orderBy = {
 				recent: "last_active DESC",
 				sessions: "session_count DESC",
@@ -162,7 +137,5 @@ export const projectsCommand = new Command("projects")
 				console.log(table.toString());
 				console.log(c.overlay1(`\n${entries.length} project(s)`));
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

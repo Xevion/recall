@@ -93,13 +93,6 @@ const DEFAULT_CONFIG: RecallConfig = {
 
 let _config: RecallConfig | null = null;
 
-function _expandHome(p: string): string {
-	if (p.startsWith("~/")) {
-		return resolve(process.env.HOME ?? "", p.slice(2));
-	}
-	return p;
-}
-
 function configPath(): string {
 	const xdgData =
 		process.env.XDG_DATA_HOME ||

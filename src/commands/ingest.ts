@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { close, getDb } from "../db/index";
+import { withDb } from "../db/index";
 import { ingest } from "../ingest/index";
 
 export const ingestCommand = new Command("ingest")
@@ -12,8 +12,7 @@ export const ingestCommand = new Command("ingest")
 	.option("--since <date>", "Only ingest sessions after this date")
 	.option("--force", "Re-ingest all sessions, ignoring ingest log", false)
 	.action(async (opts) => {
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const results = await ingest(db, {
 				source: opts.source,
 				since: opts.since,
@@ -28,7 +27,5 @@ export const ingestCommand = new Command("ingest")
 					console.error(`  error: ${err}`);
 				}
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

@@ -1,19 +1,56 @@
 import { Command } from "commander";
-import { all, close, getDb } from "../db/index";
+import { all, withDb } from "../db/index";
 import { resolveSessionId } from "../db/queries";
 import { extractProjectName } from "../utils/path";
+
+interface SessionDetail {
+	id: string;
+	source: string;
+	parent_id: string | null;
+	project_path: string | null;
+	project_name: string | null;
+	git_branch: string | null;
+	title: string | null;
+	started_at: string;
+	ended_at: string | null;
+	message_count: number;
+	turn_count: number;
+	token_input: number;
+	token_output: number;
+	duration_s: number;
+	source_path: string;
+}
+
+interface AnalysisDetail {
+	session_id: string;
+	status: string;
+	summary: string | null;
+	topics: string[] | null;
+	frustrations: string[] | null;
+	workflow_notes: string | null;
+}
+
+interface SubagentRow {
+	id: string;
+	title: string | null;
+	message_count: number;
+	turn_count: number;
+}
+
+interface ToolStatRow {
+	tool_name: string;
+	count: number;
+	errors: number;
+}
 
 export const showCommand = new Command("show")
 	.description("Show detailed session info")
 	.argument("<session-id>", "Session ID (or unique prefix)")
 	.option("--json", "Output as JSON")
 	.action(async (sessionId, opts) => {
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const resolved = await resolveSessionId(db, sessionId);
-			if (!resolved) return;
-
-			const [session] = await all(
+			const [session] = await all<SessionDetail>(
 				db,
 				"SELECT * FROM session WHERE id = ?",
 				resolved,
@@ -23,23 +60,21 @@ export const showCommand = new Command("show")
 				process.exit(1);
 			}
 
-			const s = session as Record<string, unknown>;
-
-			const analysis = await all(
+			const analysis = await all<AnalysisDetail>(
 				db,
 				"SELECT * FROM analysis WHERE session_id = ?",
-				s.id,
+				session.id,
 			);
-			const subagents = await all(
+			const subagents = await all<SubagentRow>(
 				db,
 				"SELECT id, title, message_count, turn_count FROM session WHERE parent_id = ?",
-				s.id,
+				session.id,
 			);
-			const toolStats = await all(
+			const toolStats = await all<ToolStatRow>(
 				db,
 				`SELECT tool_name, COUNT(*) as count, SUM(CASE WHEN is_error THEN 1 ELSE 0 END) as errors
          FROM tool_call WHERE session_id = ? GROUP BY tool_name ORDER BY count DESC`,
-				s.id,
+				session.id,
 			);
 
 			if (opts.json) {
@@ -52,20 +87,24 @@ export const showCommand = new Command("show")
 				);
 			} else {
 				const projectDisplay =
-					extractProjectName(s.project_path as string | null) ??
-					(s.project_name as string | null) ??
+					extractProjectName(session.project_path) ??
+					session.project_name ??
 					"unknown";
-				console.log(`Session: ${s.id}`);
-				console.log(`Source: ${s.source}`);
+				console.log(`Session: ${session.id}`);
+				console.log(`Source: ${session.source}`);
 				console.log(`Project: ${projectDisplay}`);
-				console.log(`Branch: ${s.git_branch ?? "unknown"}`);
-				console.log(`Started: ${s.started_at}`);
-				console.log(`Duration: ${s.duration_s}s`);
-				console.log(`Messages: ${s.message_count}, Turns: ${s.turn_count}`);
-				console.log(`Tokens: ${s.token_input} in / ${s.token_output} out`);
+				console.log(`Branch: ${session.git_branch ?? "unknown"}`);
+				console.log(`Started: ${session.started_at}`);
+				console.log(`Duration: ${session.duration_s}s`);
+				console.log(
+					`Messages: ${session.message_count}, Turns: ${session.turn_count}`,
+				);
+				console.log(
+					`Tokens: ${session.token_input} in / ${session.token_output} out`,
+				);
 
-				if (analysis[0]) {
-					const a = analysis[0] as Record<string, unknown>;
+				const a = analysis[0];
+				if (a) {
 					console.log(`\nAnalysis (${a.status}):`);
 					if (a.summary) console.log(`  Summary: ${a.summary}`);
 					if (a.topics) console.log(`  Topics: ${a.topics}`);
@@ -75,23 +114,20 @@ export const showCommand = new Command("show")
 
 				if (subagents.length > 0) {
 					console.log(`\nSubagents (${subagents.length}):`);
-					for (const sa of subagents as Array<Record<string, unknown>>) {
+					for (const sa of subagents) {
 						console.log(
 							`  ${sa.id} — ${sa.title ?? "untitled"} (${sa.message_count} msgs)`,
 						);
 					}
 				}
 
-				if ((toolStats as unknown[]).length > 0) {
+				if (toolStats.length > 0) {
 					console.log(`\nTool usage:`);
-					for (const t of toolStats as Array<Record<string, unknown>>) {
-						const errStr =
-							(t.errors as number) > 0 ? ` (${t.errors} errors)` : "";
+					for (const t of toolStats) {
+						const errStr = t.errors > 0 ? ` (${t.errors} errors)` : "";
 						console.log(`  ${t.tool_name}: ${t.count}${errStr}`);
 					}
 				}
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

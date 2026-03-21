@@ -1,5 +1,14 @@
 import { Command } from "commander";
-import { all, close, getDb } from "../db/index";
+import { all, withDb } from "../db/index";
+import { parseIntOption } from "../utils/validation";
+
+interface ResearchRow {
+	id: string;
+	topic: string;
+	tags: string[];
+	created_at: string;
+	content_length: number;
+}
 
 export const researchCommand = new Command("research")
 	.description("Browse and search research artifacts")
@@ -9,12 +18,13 @@ export const researchCommand = new Command("research")
 	.option("-l, --limit <n>", "Number of results", "20")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
-		const db = await getDb();
-		try {
-			let results: Record<string, unknown>[];
+		const limit = parseIntOption(opts.limit, "limit");
+
+		await withDb(async (db) => {
+			let results: ResearchRow[];
 
 			if (opts.topic) {
-				results = await all(
+				results = await all<ResearchRow>(
 					db,
 					`SELECT id, topic, tags, created_at, length(content) as content_length
            FROM research_artifact
@@ -22,36 +32,36 @@ export const researchCommand = new Command("research")
            ORDER BY created_at DESC LIMIT ?`,
 					`%${opts.topic}%`,
 					`%${opts.topic}%`,
-					parseInt(opts.limit, 10),
+					limit,
 				);
 			} else if (opts.tags) {
-				results = await all(
+				results = await all<ResearchRow>(
 					db,
 					`SELECT id, topic, tags, created_at, length(content) as content_length
            FROM research_artifact
            WHERE list_contains(tags, ?)
            ORDER BY created_at DESC LIMIT ?`,
 					opts.tags,
-					parseInt(opts.limit, 10),
+					limit,
 				);
 			} else {
-				results = await all(
+				results = await all<ResearchRow>(
 					db,
 					`SELECT id, topic, tags, created_at, length(content) as content_length
            FROM research_artifact
            ORDER BY created_at DESC LIMIT ?`,
-					parseInt(opts.limit, 10),
+					limit,
 				);
 			}
 
 			if (opts.json) {
 				console.log(JSON.stringify(results, null, 2));
 			} else {
-				if ((results as unknown[]).length === 0) {
+				if (results.length === 0) {
 					console.log("No research artifacts found.");
 					return;
 				}
-				for (const r of results as Array<Record<string, unknown>>) {
+				for (const r of results) {
 					console.log(`${r.id}`);
 					console.log(`  Topic: ${r.topic}`);
 					console.log(`  Tags: ${r.tags}`);
@@ -59,7 +69,5 @@ export const researchCommand = new Command("research")
 					console.log();
 				}
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

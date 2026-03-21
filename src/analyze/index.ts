@@ -43,14 +43,18 @@ export async function analyze(
 		refused: 0,
 	};
 
-	// Get sessions pending analysis
-	let sessions: Array<{
+	interface CandidateSession {
 		id: string;
 		message_count: number;
 		turn_count: number;
 		duration_s: number;
 		parent_id: string | null;
-	}>;
+		has_tool_calls: boolean;
+		has_subagents: boolean;
+		has_errors: boolean;
+	}
+
+	let sessions: CandidateSession[];
 
 	debug(`analyze: limit=${opts.limit ?? 100}, force=${opts.force ?? "none"}`);
 
@@ -71,9 +75,13 @@ export async function analyze(
 	}
 
 	if (opts.force) {
-		sessions = await all(
+		sessions = await all<CandidateSession>(
 			db,
-			"SELECT id, message_count, turn_count, duration_s, parent_id FROM session WHERE id = ?",
+			`SELECT s.id, s.message_count, s.turn_count, s.duration_s, s.parent_id,
+			   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id) as has_tool_calls,
+			   EXISTS(SELECT 1 FROM session c WHERE c.parent_id = s.id) as has_subagents,
+			   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id AND is_error = TRUE) as has_errors
+			 FROM session s WHERE s.id = ?`,
 			opts.force,
 		);
 		// Reset analysis status
@@ -83,55 +91,33 @@ export async function analyze(
 			opts.force,
 		);
 	} else {
-		sessions = await all(
+		sessions = await all<CandidateSession>(
 			db,
-			`SELECT s.id, s.message_count, s.turn_count, s.duration_s, s.parent_id
-       FROM session s
-       JOIN analysis a ON s.id = a.session_id
-       WHERE a.status IN ('pending', 'retry_pending')
-       ORDER BY s.started_at DESC
-       LIMIT ?`,
+			`SELECT s.id, s.message_count, s.turn_count, s.duration_s, s.parent_id,
+			   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id) as has_tool_calls,
+			   EXISTS(SELECT 1 FROM session c WHERE c.parent_id = s.id) as has_subagents,
+			   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id AND is_error = TRUE) as has_errors
+			 FROM session s
+			 JOIN analysis a ON s.id = a.session_id
+			 WHERE a.status IN ('pending', 'retry_pending')
+			 ORDER BY s.started_at DESC
+			 LIMIT ?`,
 			opts.limit ?? 100,
 		);
 	}
 
 	debug(`analyze: ${sessions.length} candidate session(s) found`);
 
-	const toAnalyze: typeof sessions = [];
+	const toAnalyze: CandidateSession[] = [];
 	for (const session of sessions) {
-		const hasToolCalls =
-			(
-				await all(
-					db,
-					"SELECT 1 FROM tool_call WHERE session_id = ? LIMIT 1",
-					session.id,
-				)
-			).length > 0;
-		const hasSubagents =
-			(
-				await all(
-					db,
-					"SELECT 1 FROM session WHERE parent_id = ? LIMIT 1",
-					session.id,
-				)
-			).length > 0;
-		const hasErrors =
-			(
-				await all(
-					db,
-					"SELECT 1 FROM tool_call WHERE session_id = ? AND is_error = TRUE LIMIT 1",
-					session.id,
-				)
-			).length > 0;
-
 		const input: TriageInput = {
 			sessionId: session.id,
 			messageCount: session.message_count ?? 0,
 			turnCount: session.turn_count ?? 0,
 			durationS: session.duration_s ?? 0,
-			hasToolCalls,
-			hasSubagents,
-			hasErrors,
+			hasToolCalls: session.has_tool_calls,
+			hasSubagents: session.has_subagents,
+			hasErrors: session.has_errors,
 		};
 
 		const decision = triageSession(input, config.analyze.triage);
@@ -159,7 +145,7 @@ export async function analyze(
 	const chunks = chunkArray(toAnalyze, config.analyze.parallelism);
 	let consecutiveFailures = 0;
 
-	for (const chunk of chunks) {
+	for (let i = 0; i < chunks.length; i++) {
 		if (consecutiveFailures >= config.analyze.max_consecutive_failures) {
 			debug(
 				`circuit breaker: ${consecutiveFailures} consecutive failures, aborting`,
@@ -167,6 +153,7 @@ export async function analyze(
 			break;
 		}
 
+		const chunk = chunks[i]!;
 		const results = await Promise.all(
 			chunk.map((session) =>
 				analyzeSession(db, session.id, session.parent_id, config),
@@ -186,10 +173,7 @@ export async function analyze(
 			}
 		}
 
-		if (
-			config.analyze.delay_ms > 0 &&
-			chunks.indexOf(chunk) < chunks.length - 1
-		) {
+		if (config.analyze.delay_ms > 0 && i < chunks.length - 1) {
 			await new Promise((r) => setTimeout(r, config.analyze.delay_ms));
 		}
 	}

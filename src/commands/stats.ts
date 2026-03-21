@@ -1,8 +1,21 @@
+import Table from "cli-table3";
 import { Command } from "commander";
-import { all, close, getDb } from "../db/index";
+import { all, withDb } from "../db/index";
+import { formatDuration, formatTokens } from "../utils/format";
+import { BORDERLESS_CHARS, c } from "../utils/theme";
 import { parseRelativeDate, resolveEnumOption } from "../utils/validation";
 
 const VALID_PERIODS = ["day", "week", "month"] as const;
+
+interface StatsRow {
+	period: string;
+	sessions: number;
+	messages: number;
+	turns: number;
+	tokens_in: number;
+	tokens_out: number;
+	total_duration_s: number;
+}
 
 export const statsCommand = new Command("stats")
 	.description("Aggregate usage statistics")
@@ -13,8 +26,7 @@ export const statsCommand = new Command("stats")
 		const period = resolveEnumOption(opts.by, VALID_PERIODS, "by");
 		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
 
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const truncFn = {
 				day: "date_trunc('day', started_at)",
 				week: "date_trunc('week', started_at)",
@@ -28,10 +40,9 @@ export const statsCommand = new Command("stats")
 				params.push(since);
 			}
 
-			const where =
-				conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+			const where = `WHERE ${conditions.join(" AND ")}`;
 
-			const results = await all(
+			const results = await all<StatsRow>(
 				db,
 				`SELECT
            ${truncFn} as period,
@@ -52,8 +63,8 @@ export const statsCommand = new Command("stats")
 			if (opts.json) {
 				console.log(JSON.stringify(results, null, 2));
 			} else {
-				console.log(
-					[
+				const table = new Table({
+					head: [
 						"Period",
 						"Sessions",
 						"Messages",
@@ -61,28 +72,40 @@ export const statsCommand = new Command("stats")
 						"Tokens In",
 						"Tokens Out",
 						"Duration",
-					]
-						.map((h) => h.padEnd(14))
-						.join(""),
-				);
-				console.log("-".repeat(98));
-				for (const r of results as Array<Record<string, unknown>>) {
-					console.log(
-						[
-							new Date(r.period as string).toLocaleDateString(),
-							String(r.sessions),
-							String(r.messages),
-							String(r.turns),
-							String(r.tokens_in),
-							String(r.tokens_out),
-							`${Math.round((r.total_duration_s as number) / 60)}m`,
-						]
-							.map((v) => v.padEnd(14))
-							.join(""),
-					);
+					].map((h) => c.text.bold(h)),
+					colAligns: [
+						"left",
+						"right",
+						"right",
+						"right",
+						"right",
+						"right",
+						"right",
+					],
+					colWidths: [14, 10, 10, 8, 12, 12, 10],
+					style: {
+						head: [],
+						border: [],
+						"padding-left": 0,
+						"padding-right": 0,
+					},
+					chars: BORDERLESS_CHARS,
+				});
+
+				for (const r of results) {
+					table.push([
+						c.text(new Date(r.period).toLocaleDateString()),
+						c.subtext0(String(r.sessions)),
+						c.subtext0(String(r.messages)),
+						c.subtext0(String(r.turns)),
+						c.overlay1(formatTokens(r.tokens_in)),
+						c.overlay1(formatTokens(r.tokens_out)),
+						c.overlay1(formatDuration(r.total_duration_s)),
+					]);
 				}
+
+				console.log(table.toString());
+				console.log(c.overlay1(`\n${results.length} period(s)`));
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

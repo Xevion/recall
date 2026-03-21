@@ -1,8 +1,9 @@
 import Table from "cli-table3";
 import { Command } from "commander";
-import { close, getDb } from "../db/index";
+import { withDb } from "../db/index";
 import type { SessionRow } from "../db/queries";
 import { getAvailableProjects, listSessions } from "../db/queries";
+import { formatDate, formatDuration } from "../utils/format";
 import { extractProjectName } from "../utils/path";
 import { BORDERLESS_CHARS, c } from "../utils/theme";
 import {
@@ -122,30 +123,6 @@ function colorNumeric(
 	if (val < p75) return c.teal(formatted);
 	if (val < p90) return c.peach(formatted);
 	return c.catRed(formatted);
-}
-
-function formatDuration(seconds: number | null): string {
-	if (seconds == null) return "—";
-	if (seconds < 60) return `${seconds}s`;
-	const m = Math.floor(seconds / 60);
-	const s = seconds % 60;
-	if (m < 60) return `${m}m${s > 0 ? ` ${s}s` : ""}`;
-	const h = Math.floor(m / 60);
-	const rm = m % 60;
-	return `${h}h${rm > 0 ? ` ${rm}m` : ""}`;
-}
-
-function formatDate(iso: string, wide: boolean): string {
-	const d = new Date(iso);
-	if (wide) return d.toLocaleString();
-	const now = new Date();
-	const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
-	if (diffDays === 0)
-		return `Today ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-	if (diffDays === 1)
-		return `Yesterday ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-	if (diffDays < 7) return `${diffDays}d ago`;
-	return d.toLocaleDateString();
 }
 
 function projectDisplay(row: SessionRow): string {
@@ -286,8 +263,7 @@ export const sessionsCommand = new Command("sessions")
 			? parseIntOption(opts.minMessages, "min-messages")
 			: undefined;
 
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const sessions = await listSessions(db, {
 				project: opts.project,
 				source,
@@ -315,7 +291,5 @@ export const sessionsCommand = new Command("sessions")
 					}
 				}
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { close, getDb } from "../db/index";
+import { withDb } from "../db/index";
 import { searchContent } from "../db/queries";
 import { resolveEnumOption } from "../utils/validation";
 
@@ -17,8 +17,7 @@ export const searchCommand = new Command("search")
 	.action(async (query, opts) => {
 		const scope = resolveEnumOption(opts.in, VALID_SCOPES, "in");
 
-		const db = await getDb();
-		try {
+		await withDb(async (db) => {
 			const results = await searchContent(db, query, scope);
 
 			if (opts.json) {
@@ -34,7 +33,5 @@ export const searchCommand = new Command("search")
 					console.log();
 				}
 			}
-		} finally {
-			await close();
-		}
+		});
 	});

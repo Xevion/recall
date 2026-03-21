@@ -22,9 +22,6 @@ export async function getConnection(): Promise<DuckDBConnection> {
 	return _conn;
 }
 
-/** Alias kept for callers that use `getDb()`. */
-export const getDb = getConnection;
-
 export async function run(
 	conn: DuckDBConnection,
 	sql: string,
@@ -73,4 +70,15 @@ export async function close(): Promise<void> {
 		_conn = null;
 	}
 	_instance = null;
+}
+
+export async function withDb<T>(
+	fn: (db: DuckDBConnection) => Promise<T>,
+): Promise<T> {
+	const db = await getConnection();
+	try {
+		return await fn(db);
+	} finally {
+		await close();
+	}
 }

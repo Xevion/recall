@@ -1,4 +1,4 @@
-import type duckdb from "duckdb";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { all } from "../db/index";
 
 /**
@@ -7,7 +7,7 @@ import { all } from "../db/index";
  * Excludes full tool output to stay within reasonable token budgets.
  */
 export async function buildAnalysisPrompt(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	sessionId: string,
 ): Promise<string> {
 	const messages = await all<{

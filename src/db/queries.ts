@@ -1,4 +1,4 @@
-import type duckdb from "duckdb";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { all } from "./index";
 
 export interface SessionRow {
@@ -16,7 +16,7 @@ export interface SessionRow {
 }
 
 export async function listSessions(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	opts: {
 		project?: string;
 		source?: string;
@@ -57,7 +57,7 @@ export async function listSessions(
 }
 
 export async function getToolStats(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	opts: {
 		since?: string;
 		project?: string;
@@ -102,7 +102,7 @@ export async function getToolStats(
 }
 
 export async function searchContent(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	query: string,
 	scope: "summaries" | "research" | "messages" | "all" = "summaries",
 ) {

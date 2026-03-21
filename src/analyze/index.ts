@@ -1,4 +1,4 @@
-import type duckdb from "duckdb";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
 import { buildAnalysisPrompt } from "./prompt";
@@ -21,7 +21,7 @@ export interface AnalyzeResult {
 }
 
 export async function analyze(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	opts: AnalyzeOptions,
 ): Promise<AnalyzeResult> {
 	const config = await loadConfig();
@@ -160,7 +160,7 @@ export async function analyze(
 }
 
 async function analyzeSession(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	sessionId: string,
 	parentId: string | null,
 	config: Awaited<ReturnType<typeof loadConfig>>,

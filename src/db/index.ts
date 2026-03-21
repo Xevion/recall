@@ -1,65 +1,83 @@
-import duckdb from "duckdb";
-import { resolve } from "path";
+import { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
+import { resolve } from "node:path";
 import { loadConfig } from "../config";
 import { initSchema } from "./schema";
 
-let _db: duckdb.Database | null = null;
+let _instance: DuckDBInstance | null = null;
+let _conn: DuckDBConnection | null = null;
 
-function expandPath(p: string): string {
+export function expandPath(p: string): string {
 	if (p.startsWith("~/")) {
 		return resolve(process.env.HOME!, p.slice(2));
 	}
 	return resolve(p);
 }
 
-export async function getDb(): Promise<duckdb.Database> {
-	if (_db) return _db;
+export async function getConnection(): Promise<DuckDBConnection> {
+	if (_conn) return _conn;
 
 	const config = await loadConfig();
 	const dbPath = expandPath(config.database.path);
 
 	// Ensure parent directory exists
 	const dir = dbPath.substring(0, dbPath.lastIndexOf("/"));
-	await Bun.write(Bun.file(dir + "/.keep"), "");
+	await Bun.write(Bun.file(`${dir}/.keep`), "");
 
-	_db = new duckdb.Database(dbPath);
-	await initSchema(_db);
-	return _db;
+	_instance = await DuckDBInstance.create(dbPath);
+	_conn = await _instance.connect();
+	await initSchema(_conn);
+	return _conn;
 }
 
-export function run(
-	db: duckdb.Database,
+/** Alias kept for callers that use `getDb()`. */
+export const getDb = getConnection;
+
+export async function run(
+	conn: DuckDBConnection,
 	sql: string,
 	...params: unknown[]
 ): Promise<void> {
-	return new Promise((resolve, reject) => {
-		db.run(sql, ...params, (err: Error | null) => {
-			if (err) reject(err);
-			else resolve();
-		});
-	});
+	if (params.length > 0) {
+		await conn.run(sql, params as Parameters<typeof conn.run>[1]);
+	} else {
+		await conn.run(sql);
+	}
 }
 
-export function all<T = Record<string, unknown>>(
-	db: duckdb.Database,
+export async function all<T = Record<string, unknown>>(
+	conn: DuckDBConnection,
 	sql: string,
 	...params: unknown[]
 ): Promise<T[]> {
-	return new Promise((resolve, reject) => {
-		db.all(sql, ...params, (err: Error | null, rows: T[]) => {
-			if (err) reject(err);
-			else resolve(rows);
-		});
-	});
+	const reader =
+		params.length > 0
+			? await conn.runAndReadAll(
+					sql,
+					params as Parameters<typeof conn.runAndReadAll>[1],
+				)
+			: await conn.runAndReadAll(sql);
+	return reader.getRowObjectsJson() as unknown as T[];
 }
 
-export function close(): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (!_db) return resolve();
-		_db.close((err: Error | null) => {
-			_db = null;
-			if (err) reject(err);
-			else resolve();
-		});
-	});
+export async function withTransaction<T>(
+	conn: DuckDBConnection,
+	fn: (conn: DuckDBConnection) => Promise<T>,
+): Promise<T> {
+	await conn.run("BEGIN");
+	try {
+		const result = await fn(conn);
+		await conn.run("COMMIT");
+		return result;
+	} catch (err) {
+		await conn.run("ROLLBACK");
+		throw err;
+	}
+}
+
+export async function close(): Promise<void> {
+	if (_conn) {
+		_conn.closeSync();
+		_conn = null;
+	}
+	_instance = null;
 }

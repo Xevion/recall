@@ -1,5 +1,5 @@
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { Database as SQLiteDB } from "bun:sqlite";
-import type duckdb from "duckdb";
 import { all, run } from "../db/index";
 import type { IngestOptions, IngestResult } from "./index";
 import type {
@@ -10,7 +10,7 @@ import type {
 } from "./types";
 
 export async function ingestOpenCode(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	dbPath: string,
 	opts: IngestOptions,
 ): Promise<IngestResult> {
@@ -207,7 +207,7 @@ function parseOpenCodeSession(
 }
 
 async function persistOpenCodeSession(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	session: NormalizedSession,
 ): Promise<void> {
 	// Reuse the same persistence logic as claude-code

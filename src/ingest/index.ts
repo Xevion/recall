@@ -1,6 +1,5 @@
-import type duckdb from "duckdb";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadConfig } from "../config";
-import { all, run } from "../db/index";
 import { ingestClaudeCode } from "./claude-code";
 import { ingestOpenCode } from "./opencode";
 
@@ -18,7 +17,7 @@ export interface IngestResult {
 }
 
 export async function ingest(
-	db: duckdb.Database,
+	conn: DuckDBConnection,
 	opts: IngestOptions,
 ): Promise<IngestResult[]> {
 	const config = await loadConfig();
@@ -30,7 +29,7 @@ export async function ingest(
 		config.sources["claude-code"]?.enabled
 	) {
 		const result = await ingestClaudeCode(
-			db,
+			conn,
 			config.sources["claude-code"].path,
 			opts,
 		);
@@ -42,7 +41,7 @@ export async function ingest(
 		config.sources["opencode"]?.enabled
 	) {
 		const result = await ingestOpenCode(
-			db,
+			conn,
 			config.sources["opencode"].path,
 			opts,
 		);

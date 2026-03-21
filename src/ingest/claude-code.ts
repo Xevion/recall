@@ -1,5 +1,5 @@
-import type duckdb from "duckdb";
-import { resolve } from "path";
+import type { DuckDBConnection } from "@duckdb/node-api";
+import { resolve } from "node:path";
 import { all, run } from "../db/index";
 import type { IngestOptions, IngestResult } from "./index";
 import type {
@@ -10,7 +10,7 @@ import type {
 } from "./types";
 
 export async function ingestClaudeCode(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	basePath: string,
 	opts: IngestOptions,
 ): Promise<IngestResult> {
@@ -258,7 +258,7 @@ function summarizeInput(
 }
 
 async function persistSession(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	session: NormalizedSession,
 ): Promise<void> {
 	await run(

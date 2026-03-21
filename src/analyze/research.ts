@@ -1,5 +1,4 @@
-import type duckdb from "duckdb";
-import type { RecallConfig } from "../config";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, run } from "../db/index";
 import type { AnalysisOutput } from "./schema";
 
@@ -30,7 +29,7 @@ export function isResearchByPrompt(
  * Extract and persist a research artifact from a subagent session.
  */
 export async function extractResearchArtifact(
-	db: duckdb.Database,
+	db: DuckDBConnection,
 	sessionId: string,
 	parentSessionId: string | null,
 	analysis: AnalysisOutput,

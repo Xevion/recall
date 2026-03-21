@@ -20,8 +20,11 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.81",
+    "@catppuccin/palette": "^1.7.1",
     "@duckdb/node-api": "^1.5.0-r.1",
     "ajv": "^8.18.0",
+    "ansis": "^4.2.0",
+    "cli-table3": "^0.6.5",
     "commander": "^14.0.3",
     "smol-toml": "^1.6.0"
   }

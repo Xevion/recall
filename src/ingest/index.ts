@@ -38,11 +38,11 @@ export async function ingest(
 
 	if (
 		(sourceFilter === "all" || sourceFilter === "opencode") &&
-		config.sources["opencode"]?.enabled
+		config.sources.opencode?.enabled
 	) {
 		const result = await ingestOpenCode(
 			conn,
-			config.sources["opencode"].path,
+			config.sources.opencode.path,
 			opts,
 		);
 		results.push(result);

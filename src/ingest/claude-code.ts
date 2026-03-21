@@ -14,7 +14,7 @@ export async function ingestClaudeCode(
 	basePath: string,
 	opts: IngestOptions,
 ): Promise<IngestResult> {
-	const expandedPath = basePath.replace("~", process.env.HOME!);
+	const expandedPath = basePath.replace("~", process.env.HOME ?? "");
 	const result: IngestResult = {
 		source: "claude-code",
 		sessionsIngested: 0,
@@ -53,7 +53,7 @@ export async function ingestClaudeCode(
 			if (session) {
 				await persistSession(db, session);
 				// Also ingest subagent sessions
-				const subagentDir = filePath.replace(".jsonl", "") + "/subagents";
+				const subagentDir = `${filePath.replace(".jsonl", "")}/subagents`;
 				const subGlob = new Bun.Glob("*.jsonl");
 				try {
 					for await (const subPath of subGlob.scan({
@@ -157,7 +157,7 @@ async function parseClaudeCodeSession(
 		if (Array.isArray(contentBlocks)) {
 			for (const block of contentBlocks) {
 				if (block.type === "text") {
-					textContent += (block.text as string) + "\n";
+					textContent += `${block.text as string}\n`;
 				} else if (block.type === "tool_use") {
 					hasToolUse = true;
 					toolCalls.push({

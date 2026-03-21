@@ -82,7 +82,7 @@ export async function buildAnalysisPrompt(
 		const roleLabel = msg.role === "user" ? "USER" : "ASSISTANT";
 		const content = msg.content
 			? msg.content.length > 500
-				? msg.content.slice(0, 500) + "..."
+				? `${msg.content.slice(0, 500)}...`
 				: msg.content
 			: "(no text content)";
 

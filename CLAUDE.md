@@ -26,11 +26,22 @@ recall <command>                  # after bun build --compile
 ## Key Files
 
 - `src/cli.ts` — entry point, command routing
+- `src/config.ts` — TOML config loading
 - `src/db/schema.ts` — DuckDB table definitions
+- `src/db/index.ts` — DuckDB connection helpers (`run`, `all`)
+- `src/db/queries.ts` — reusable query functions
+- `src/ingest/index.ts` — ingest orchestration and shared types
+- `src/ingest/types.ts` — normalized type definitions (NormalizedSession, etc.)
+- `src/ingest/persist.ts` — shared `persistSession` used by both parsers
 - `src/ingest/claude-code.ts` — Claude Code JSONL parser
 - `src/ingest/opencode.ts` — OpenCode SQLite reader
 - `src/analyze/index.ts` — SDK orchestration (chunked Promise.all)
 - `src/analyze/triage.ts` — skip/analyze decision logic
+- `src/analyze/prompt.ts` — LLM prompt construction
+- `src/analyze/research.ts` — research artifact extraction
+- `src/analyze/schema.ts` — JSON schema helpers for LLM output
+- `src/commands/` — one file per CLI subcommand
+- `src/utils/` — path, logger, validation helpers
 - `schemas/analysis-output.json` — JSON schema for LLM analysis output
 - `docs/design.md` — full design document
 

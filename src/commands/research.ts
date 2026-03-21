@@ -11,7 +11,7 @@ export const researchCommand = new Command("research")
 	.action(async (opts) => {
 		const db = await getDb();
 		try {
-			let results;
+			let results: Record<string, unknown>[];
 
 			if (opts.topic) {
 				results = await all(
@@ -22,7 +22,7 @@ export const researchCommand = new Command("research")
            ORDER BY created_at DESC LIMIT ?`,
 					`%${opts.topic}%`,
 					`%${opts.topic}%`,
-					parseInt(opts.limit),
+					parseInt(opts.limit, 10),
 				);
 			} else if (opts.tags) {
 				results = await all(
@@ -32,7 +32,7 @@ export const researchCommand = new Command("research")
            WHERE list_contains(tags, ?)
            ORDER BY created_at DESC LIMIT ?`,
 					opts.tags,
-					parseInt(opts.limit),
+					parseInt(opts.limit, 10),
 				);
 			} else {
 				results = await all(
@@ -40,7 +40,7 @@ export const researchCommand = new Command("research")
 					`SELECT id, topic, tags, created_at, length(content) as content_length
            FROM research_artifact
            ORDER BY created_at DESC LIMIT ?`,
-					parseInt(opts.limit),
+					parseInt(opts.limit, 10),
 				);
 			}
 

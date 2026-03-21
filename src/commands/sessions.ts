@@ -16,7 +16,7 @@ export const sessionsCommand = new Command("sessions")
 				project: opts.project,
 				source: opts.source,
 				since: opts.since,
-				limit: parseInt(opts.limit),
+				limit: parseInt(opts.limit, 10),
 			});
 
 			if (opts.json) {

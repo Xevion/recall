@@ -10,7 +10,7 @@ export const analyzeCommand = new Command("analyze")
 		const db = await getDb();
 		try {
 			const result = await analyze(db, {
-				limit: parseInt(opts.limit),
+				limit: parseInt(opts.limit, 10),
 				force: opts.force,
 			});
 			console.log(

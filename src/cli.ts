@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { close } from "./db/index";
 import { analyzeCommand } from "./commands/analyze";
 import { frustrationsCommand } from "./commands/frustrations";
 import { ingestCommand } from "./commands/ingest";
@@ -11,6 +10,7 @@ import { sessionsCommand } from "./commands/sessions";
 import { showCommand } from "./commands/show";
 import { statsCommand } from "./commands/stats";
 import { toolsCommand } from "./commands/tools";
+import { close } from "./db/index";
 
 const program = new Command()
 	.name("recall")

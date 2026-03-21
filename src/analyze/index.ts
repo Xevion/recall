@@ -2,8 +2,6 @@ import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
 import { buildAnalysisPrompt } from "./prompt";
-import { extractResearchArtifact, isResearchByPrompt } from "./research";
-import { type AnalysisOutput, analysisSchema } from "./schema";
 import { type TriageInput, triageSession } from "./triage";
 
 // TODO: import { query } from "@anthropic-ai/claude-agent-sdk" once SDK types stabilize
@@ -162,7 +160,7 @@ export async function analyze(
 async function analyzeSession(
 	db: DuckDBConnection,
 	sessionId: string,
-	parentId: string | null,
+	_parentId: string | null,
 	config: Awaited<ReturnType<typeof loadConfig>>,
 ): Promise<"complete" | "refused" | "error"> {
 	try {

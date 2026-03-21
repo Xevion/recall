@@ -1,4 +1,4 @@
-import { resolve } from "path";
+import { resolve } from "node:path";
 import { parse } from "smol-toml";
 
 export interface RecallConfig {
@@ -93,16 +93,17 @@ const DEFAULT_CONFIG: RecallConfig = {
 
 let _config: RecallConfig | null = null;
 
-function expandHome(p: string): string {
+function _expandHome(p: string): string {
 	if (p.startsWith("~/")) {
-		return resolve(process.env.HOME!, p.slice(2));
+		return resolve(process.env.HOME ?? "", p.slice(2));
 	}
 	return p;
 }
 
 function configPath(): string {
 	const xdgData =
-		process.env.XDG_DATA_HOME || resolve(process.env.HOME!, ".local/share");
+		process.env.XDG_DATA_HOME ||
+		resolve(process.env.HOME ?? "", ".local/share");
 	return resolve(xdgData, "recall", "config.toml");
 }
 

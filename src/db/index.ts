@@ -1,4 +1,4 @@
-import { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
+import { type DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
 import { loadConfig } from "../config";
 import { expandPath } from "../utils/path";
 import { initSchema } from "./schema";

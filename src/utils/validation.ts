@@ -2,7 +2,9 @@
 export function parseIntOption(value: string, optionName = "value"): number {
 	const n = Number.parseInt(value, 10);
 	if (Number.isNaN(n)) {
-		throw new Error(`--${optionName} must be an integer, got: ${JSON.stringify(value)}`);
+		throw new Error(
+			`--${optionName} must be an integer, got: ${JSON.stringify(value)}`,
+		);
 	}
 	return n;
 }
@@ -11,7 +13,9 @@ export function parseIntOption(value: string, optionName = "value"): number {
 export function parseDateOption(value: string, optionName = "value"): string {
 	const d = new Date(value);
 	if (Number.isNaN(d.getTime())) {
-		throw new Error(`--${optionName} must be a valid date, got: ${JSON.stringify(value)}`);
+		throw new Error(
+			`--${optionName} must be a valid date, got: ${JSON.stringify(value)}`,
+		);
 	}
 	return d.toISOString();
 }

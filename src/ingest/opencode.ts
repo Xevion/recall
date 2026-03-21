@@ -15,7 +15,7 @@ export async function ingestOpenCode(
 	dbPath: string,
 	opts: IngestOptions,
 ): Promise<IngestResult> {
-	const expandedPath = dbPath.replace("~", process.env.HOME!);
+	const expandedPath = dbPath.replace("~", process.env.HOME ?? "");
 	const result: IngestResult = {
 		source: "opencode",
 		sessionsIngested: 0,
@@ -121,7 +121,7 @@ function parseOpenCodeSession(
 	let lastRole = "";
 
 	for (let seq = 0; seq < rawMessages.length; seq++) {
-		const rawMsg = rawMessages[seq]!;
+		const rawMsg = rawMessages[seq] as (typeof rawMessages)[number];
 
 		let msgData: Record<string, unknown>;
 		try {
@@ -159,7 +159,7 @@ function parseOpenCodeSession(
 			}
 
 			if (partData.type === "text") {
-				textContent += ((partData.text as string) ?? "") + "\n";
+				textContent += `${(partData.text as string) ?? ""}\n`;
 			} else if (partData.type === "tool") {
 				hasToolUse = true;
 				const state = partData.state as

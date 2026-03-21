@@ -96,7 +96,9 @@ export async function persistSession(
 	});
 }
 
-function buildMessageParams(msg: NormalizedMessage): Record<string, DuckDBValue> {
+function buildMessageParams(
+	msg: NormalizedMessage,
+): Record<string, DuckDBValue> {
 	return {
 		id: msg.id,
 		session_id: msg.sessionId,
@@ -111,7 +113,9 @@ function buildMessageParams(msg: NormalizedMessage): Record<string, DuckDBValue>
 	};
 }
 
-function buildToolCallParams(tc: NormalizedToolCall): Record<string, DuckDBValue> {
+function buildToolCallParams(
+	tc: NormalizedToolCall,
+): Record<string, DuckDBValue> {
 	return {
 		id: tc.id,
 		message_id: tc.messageId,

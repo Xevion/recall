@@ -1,10 +1,11 @@
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
+import { debug, trace } from "../utils/logger";
 import { buildAnalysisPrompt } from "./prompt";
+import { type AnalysisOutput, analysisSchema } from "./schema";
 import { type TriageInput, triageSession } from "./triage";
-
-// TODO: import { query } from "@anthropic-ai/claude-agent-sdk" once SDK types stabilize
 
 export interface AnalyzeOptions {
 	limit?: number;
@@ -39,6 +40,8 @@ export async function analyze(
 		parent_id: string | null;
 	}>;
 
+	debug(`analyze: limit=${opts.limit ?? 100}, force=${opts.force ?? "none"}`);
+
 	if (opts.force) {
 		sessions = await all(
 			db,
@@ -64,7 +67,8 @@ export async function analyze(
 		);
 	}
 
-	// Triage
+	debug(`analyze: ${sessions.length} candidate session(s) found`);
+
 	const toAnalyze: typeof sessions = [];
 	for (const session of sessions) {
 		const hasToolCalls =
@@ -104,6 +108,9 @@ export async function analyze(
 
 		const decision = triageSession(input, config.analyze.triage);
 		if (decision === "skip") {
+			debug(
+				`triage: skip ${session.id} (msgs=${input.messageCount}, turns=${input.turnCount}, dur=${input.durationS}s)`,
+			);
 			await run(
 				db,
 				"UPDATE analysis SET status = 'skipped' WHERE session_id = ?",
@@ -111,18 +118,23 @@ export async function analyze(
 			);
 			result.skipped++;
 		} else {
+			debug(
+				`triage: analyze ${session.id} (msgs=${input.messageCount}, turns=${input.turnCount}, dur=${input.durationS}s)`,
+			);
 			toAnalyze.push(session);
 		}
 	}
 
-	// Chunked parallel analysis
+	debug(
+		`analyze: ${toAnalyze.length} session(s) to analyze in chunks of ${config.analyze.parallelism}`,
+	);
 	const chunks = chunkArray(toAnalyze, config.analyze.parallelism);
 	let consecutiveFailures = 0;
 
 	for (const chunk of chunks) {
 		if (consecutiveFailures >= config.analyze.max_consecutive_failures) {
-			console.error(
-				`Circuit breaker: ${consecutiveFailures} consecutive failures, aborting.`,
+			debug(
+				`circuit breaker: ${consecutiveFailures} consecutive failures, aborting`,
 			);
 			break;
 		}
@@ -171,38 +183,83 @@ async function analyzeSession(
 		);
 
 		const prompt = await buildAnalysisPrompt(db, sessionId);
+		debug(`session ${sessionId}: prompt built (${prompt.length} chars)`);
+		trace(`session ${sessionId}: prompt preview:\n${prompt.slice(0, 500)}`);
 
-		// TODO: Replace with actual claude-agent-sdk query() call
-		//
-		// const { query } = await import("@anthropic-ai/claude-agent-sdk");
-		// let lastMessage: AnalysisOutput | null = null;
-		// let lastActivity = Date.now();
-		//
-		// for await (const message of query({
-		//   prompt: `Analyze this coding session transcript:\n\n${prompt}`,
-		//   options: {
-		//     model: config.analyze.model,
-		//     systemPrompt: "You are a session analyst...",
-		//     tools: [],
-		//     allowedTools: [],
-		//     thinking: { type: "disabled" },
-		//     persistSession: false,
-		//     settingSources: [],
-		//     outputFormat: { type: "json_schema", schema: analysisSchema },
-		//   },
-		// })) {
-		//   lastActivity = Date.now();
-		//   if (message.type === "result" && message.subtype === "success") {
-		//     lastMessage = message.structured_output as AnalysisOutput;
-		//   }
-		// }
+		const systemPrompt =
+			"You are a coding session analyst. Given a transcript of an AI coding assistant session, produce a structured JSON analysis. Be concise and factual. Focus on what was accomplished, relevant topics, any user frustrations or tool failures, and workflow observations.";
 
-		// Placeholder until SDK integration is wired up
-		console.log(
-			`[analyze] Would analyze session ${sessionId} (${prompt.length} chars)`,
+		debug(`session ${sessionId}: querying ${config.analyze.model}`);
+		let output: AnalysisOutput | null = null;
+
+		for await (const message of query({
+			prompt: `Analyze this coding session transcript:\n\n${prompt}`,
+			options: {
+				model: config.analyze.model,
+				systemPrompt,
+				tools: [],
+				allowedTools: [],
+				thinking: { type: "disabled" },
+				persistSession: false,
+				settingSources: [],
+				maxTurns: 1,
+				effort: "low",
+				outputFormat: {
+					type: "json_schema",
+					schema: analysisSchema as Record<string, unknown>,
+				},
+			},
+		})) {
+			trace(
+				`session ${sessionId}: sdk message type=${message.type}${"subtype" in message ? ` subtype=${message.subtype}` : ""}`,
+			);
+			if (message.type === "result") {
+				if (message.subtype === "success" && message.structured_output) {
+					output = message.structured_output as AnalysisOutput;
+					debug(
+						`session ${sessionId}: analysis complete — ${output.topics.length} topics, ${output.frustrations.length} frustrations`,
+					);
+					trace(`session ${sessionId}: summary: ${output.summary}`);
+				} else {
+					debug(`session ${sessionId}: result subtype=${message.subtype}`);
+					if (message.subtype !== "success" && message.errors?.length) {
+						debug(`session ${sessionId}: errors: ${message.errors.join("; ")}`);
+					}
+				}
+			}
+		}
+
+		if (!output) {
+			debug(`session ${sessionId}: refused — no structured output`);
+			await run(
+				db,
+				"UPDATE analysis SET status = 'refused', error_reason = 'No structured output returned' WHERE session_id = ?",
+				sessionId,
+			);
+			return "refused";
+		}
+
+		await run(
+			db,
+			`UPDATE analysis SET
+				status = 'complete',
+				summary = ?,
+				topics = ?::JSON::TEXT[],
+				frustrations = ?::JSON::TEXT[],
+				workflow_notes = ?,
+				analyzed_at = now(),
+				analyzer_model = ?
+			WHERE session_id = ?`,
+			output.summary,
+			JSON.stringify(output.topics),
+			JSON.stringify(output.frustrations),
+			output.workflow_notes,
+			config.analyze.model,
+			sessionId,
 		);
 		return "complete";
-	} catch (err) {
+	} catch (err: unknown) {
+		debug(`session ${sessionId}: error — ${String(err)}`);
 		const retryCount = await all<{ retry_count: number }>(
 			db,
 			"SELECT retry_count FROM analysis WHERE session_id = ?",
@@ -211,6 +268,9 @@ async function analyzeSession(
 		const currentRetries = retryCount[0]?.retry_count ?? 0;
 
 		if (currentRetries < config.analyze.max_retries) {
+			debug(
+				`session ${sessionId}: retry ${currentRetries + 1}/${config.analyze.max_retries} pending`,
+			);
 			await run(
 				db,
 				"UPDATE analysis SET status = 'retry_pending', error_reason = ?, retry_count = ? WHERE session_id = ?",
@@ -219,6 +279,7 @@ async function analyzeSession(
 				sessionId,
 			);
 		} else {
+			debug(`session ${sessionId}: max retries exhausted, marking error`);
 			await run(
 				db,
 				"UPDATE analysis SET status = 'error', error_reason = ? WHERE session_id = ?",

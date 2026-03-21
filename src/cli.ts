@@ -11,11 +11,22 @@ import { showCommand } from "./commands/show";
 import { statsCommand } from "./commands/stats";
 import { toolsCommand } from "./commands/tools";
 import { close } from "./db/index";
+import { setVerbosity } from "./utils/logger";
 
 const program = new Command()
 	.name("recall")
 	.description("Query and analyze AI coding assistant session history")
-	.version("0.1.0");
+	.version("0.1.0")
+	.option(
+		"-v, --verbose",
+		"Increase verbosity (-v, -vv, -vvv)",
+		(_v, prev: number) => prev + 1,
+		0,
+	)
+	.hook("preAction", (_thisCommand) => {
+		const opts = program.opts();
+		setVerbosity(opts.verbose as number);
+	});
 
 program.addCommand(ingestCommand);
 program.addCommand(analyzeCommand);

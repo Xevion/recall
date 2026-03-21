@@ -11,6 +11,12 @@ import { type TriageInput, triageSession } from "./triage";
 const ajv = new Ajv();
 const validateAnalysisOutput = ajv.compile<AnalysisOutput>(analysisSchema);
 
+/** Strip $schema directive — the SDK doesn't support it and may silently fall back to prose */
+function stripSchemaDirective(schema: Record<string, unknown>): Record<string, unknown> {
+	const { $schema: _, ...rest } = schema;
+	return rest;
+}
+
 export interface AnalyzeOptions {
 	limit?: number;
 	force?: string; // force re-analyze a specific session ID
@@ -45,6 +51,22 @@ export async function analyze(
 	}>;
 
 	debug(`analyze: limit=${opts.limit ?? 100}, force=${opts.force ?? "none"}`);
+
+	// Recover orphaned "processing" states from crashed runs
+	const recovered = await all<{ cnt: number }>(
+		db,
+		"SELECT count(*)::INT as cnt FROM analysis WHERE status = 'processing'",
+	);
+	const staleProcessing = recovered[0]?.cnt ?? 0;
+	if (staleProcessing > 0) {
+		debug(
+			`analyze: recovering ${staleProcessing} orphaned 'processing' session(s)`,
+		);
+		await run(
+			db,
+			"UPDATE analysis SET status = 'pending' WHERE status = 'processing'",
+		);
+	}
 
 	if (opts.force) {
 		sessions = await all(
@@ -202,16 +224,15 @@ async function analyzeSession(
 			options: {
 				model: config.analyze.model,
 				systemPrompt,
-				tools: [],
-				allowedTools: [],
 				thinking: { type: "disabled" },
 				persistSession: false,
 				settingSources: [],
 				maxTurns: 4,
 				effort: "low",
+				permissionMode: "dontAsk",
 				outputFormat: {
 					type: "json_schema",
-					schema: analysisSchema as Record<string, unknown>,
+					schema: stripSchemaDirective(analysisSchema),
 				},
 			},
 		})) {
@@ -269,27 +290,30 @@ async function analyzeSession(
 		}
 
 		if (!output) {
+			const raw = rawResultText ?? "";
 			const isRefusal =
 				rawResultText != null &&
 				/\b(i can't|i cannot|i'm unable|refuse|inappropriate|not appropriate)\b/i.test(
 					rawResultText,
 				);
-			const raw = rawResultText ?? "";
-			const reason = isRefusal
-				? `Model refused: ${truncate(raw, 500)}`
-				: rawResultText
-					? `No structured output. Raw: ${truncate(raw, 500)}`
-					: "No structured output returned";
-			debug(
-				`session ${sessionId}: ${isRefusal ? "refused" : "no output"} — ${truncate(reason, 200)}`,
-			);
-			await run(
-				db,
-				"UPDATE analysis SET status = 'refused', error_reason = ? WHERE session_id = ?",
-				reason,
-				sessionId,
-			);
-			return "refused";
+
+			if (isRefusal) {
+				const reason = `Model refused: ${truncate(raw, 500)}`;
+				debug(`session ${sessionId}: refused — ${truncate(reason, 200)}`);
+				await run(
+					db,
+					"UPDATE analysis SET status = 'refused', error_reason = ? WHERE session_id = ?",
+					reason,
+					sessionId,
+				);
+				return "refused";
+			}
+
+			const reason = rawResultText
+				? `No structured output. Raw: ${truncate(raw, 500)}`
+				: "No structured output returned";
+			debug(`session ${sessionId}: no output — ${truncate(reason, 200)}`);
+			throw new Error(reason);
 		}
 
 		await run(
@@ -353,12 +377,10 @@ export function tryExtractAnalysisOutput(
 	raw: string,
 	sessionId: string,
 ): AnalysisOutput | null {
-	// Strip markdown code fences if present
 	const stripped = raw
 		.replace(/^```(?:json)?\s*\n?/m, "")
 		.replace(/\n?```\s*$/m, "");
 
-	// Try to extract a JSON object
 	const jsonMatch = stripped.match(/\{[\s\S]*\}/);
 	if (!jsonMatch) {
 		debug(`session ${sessionId}: fallback — no JSON object found in raw text`);

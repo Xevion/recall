@@ -60,8 +60,7 @@ describe("tryExtractAnalysisOutput", () => {
 		expect(result).toBeNull();
 	});
 
-	test("accepts output with additional properties set to false by schema", () => {
-		// additionalProperties: false in the schema means extra fields should fail
+	test("rejects output with additional properties", () => {
 		const withExtra = { ...VALID_OUTPUT, extra_field: "should fail" };
 		const raw = JSON.stringify(withExtra);
 		const result = tryExtractAnalysisOutput(raw, "test-9");

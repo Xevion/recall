@@ -12,6 +12,7 @@ import { statsCommand } from "./commands/stats";
 import { toolsCommand } from "./commands/tools";
 import { close } from "./db/index";
 import { setVerbosity } from "./utils/logger";
+import { ValidationError } from "./utils/validation";
 
 const program = new Command()
 	.name("recall")
@@ -48,4 +49,10 @@ async function shutdown(): Promise<void> {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-program.parse();
+program.parseAsync().catch((err) => {
+	if (err instanceof ValidationError) {
+		console.error(err.message);
+		process.exit(1);
+	}
+	throw err;
+});

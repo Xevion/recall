@@ -1,4 +1,5 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
+import { extractProjectName } from "../utils/path";
 import { all } from "./index";
 
 export interface SessionRow {
@@ -47,8 +48,8 @@ export async function listSessions(
 	const params: unknown[] = [];
 
 	if (opts.project) {
-		conditions.push("s.project_name ILIKE ?");
-		params.push(`%${opts.project}%`);
+		conditions.push("(s.project_name ILIKE ? OR s.project_path ILIKE ?)");
+		params.push(`%${opts.project}%`, `%${opts.project}%`);
 	}
 	if (opts.source) {
 		conditions.push("s.source = ?");
@@ -165,8 +166,8 @@ export async function getToolStats(
 		params.push(opts.since);
 	}
 	if (opts.project) {
-		conditions.push("s.project_name ILIKE ?");
-		params.push(`%${opts.project}%`);
+		conditions.push("(s.project_name ILIKE ? OR s.project_path ILIKE ?)");
+		params.push(`%${opts.project}%`, `%${opts.project}%`);
 	}
 
 	const where =
@@ -263,4 +264,23 @@ export async function searchContent(
 	}
 
 	return results;
+}
+
+/**
+ * Get distinct human-readable project names from all sessions.
+ * Used for "did you mean?" suggestions when --project matches nothing.
+ */
+export async function getAvailableProjects(
+	db: DuckDBConnection,
+): Promise<string[]> {
+	const rows = await all<{ project_path: string }>(
+		db,
+		"SELECT DISTINCT project_path FROM session WHERE project_path IS NOT NULL AND parent_id IS NULL",
+	);
+	const names = new Set<string>();
+	for (const row of rows) {
+		const name = extractProjectName(row.project_path);
+		if (name) names.add(name);
+	}
+	return [...names].sort();
 }

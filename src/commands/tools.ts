@@ -1,6 +1,14 @@
 import { Command } from "commander";
 import { close, getDb } from "../db/index";
-import { getToolStats } from "../db/queries";
+import { getAvailableProjects, getToolStats } from "../db/queries";
+import { c } from "../utils/theme";
+import {
+	parseRelativeDate,
+	resolveEnumOption,
+	suggestProject,
+} from "../utils/validation";
+
+const VALID_SORTS = ["frequency", "errors", "duration"] as const;
 
 export const toolsCommand = new Command("tools")
 	.description("Tool usage breakdown across sessions")
@@ -9,12 +17,15 @@ export const toolsCommand = new Command("tools")
 	.option("--sort <by>", "Sort by: frequency, errors, duration", "frequency")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
+		const sort = resolveEnumOption(opts.sort, VALID_SORTS, "sort");
+		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
+
 		const db = await getDb();
 		try {
 			const stats = await getToolStats(db, {
-				since: opts.since,
+				since,
 				project: opts.project,
-				sort: opts.sort,
+				sort,
 			});
 
 			if (opts.json) {
@@ -38,6 +49,13 @@ export const toolsCommand = new Command("tools")
 							.map((v) => v.padEnd(16))
 							.join(""),
 					);
+				}
+			}
+			if ((stats as unknown[]).length === 0 && opts.project && !opts.json) {
+				const available = await getAvailableProjects(db);
+				const suggestions = suggestProject(opts.project, available);
+				if (suggestions.length > 0) {
+					console.error(c.overlay1(`Did you mean: ${suggestions.join(", ")}?`));
 				}
 			}
 		} finally {

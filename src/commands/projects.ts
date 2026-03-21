@@ -3,6 +3,9 @@ import { Command } from "commander";
 import { all, close, getDb } from "../db/index";
 import { extractProjectName } from "../utils/path";
 import { BORDERLESS_CHARS, c } from "../utils/theme";
+import { resolveEnumOption } from "../utils/validation";
+
+const VALID_SORTS = ["recent", "sessions", "tokens"] as const;
 
 function formatTokens(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -34,14 +37,15 @@ export const projectsCommand = new Command("projects")
 	.option("--sort <by>", "Sort by: recent, sessions, tokens", "recent")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
+		const sort = resolveEnumOption(opts.sort, VALID_SORTS, "sort");
+
 		const db = await getDb();
 		try {
-			const orderBy =
-				{
-					recent: "last_active DESC",
-					sessions: "session_count DESC",
-					tokens: "total_tokens DESC",
-				}[opts.sort as string] ?? "last_active DESC";
+			const orderBy = {
+				recent: "last_active DESC",
+				sessions: "session_count DESC",
+				tokens: "total_tokens DESC",
+			}[sort];
 
 			const rows = await all<{
 				project_path: string;
@@ -95,21 +99,20 @@ export const projectsCommand = new Command("projects")
 			}
 
 			// Re-sort merged results
-			const sortFn =
-				{
-					recent: (
-						a: [string, { lastActive: string }],
-						b: [string, { lastActive: string }],
-					) => b[1].lastActive.localeCompare(a[1].lastActive),
-					sessions: (
-						a: [string, { sessions: number }],
-						b: [string, { sessions: number }],
-					) => b[1].sessions - a[1].sessions,
-					tokens: (
-						a: [string, { tokens: number }],
-						b: [string, { tokens: number }],
-					) => b[1].tokens - a[1].tokens,
-				}[opts.sort as string] ?? undefined;
+			const sortFn = {
+				recent: (
+					a: [string, { lastActive: string }],
+					b: [string, { lastActive: string }],
+				) => b[1].lastActive.localeCompare(a[1].lastActive),
+				sessions: (
+					a: [string, { sessions: number }],
+					b: [string, { sessions: number }],
+				) => b[1].sessions - a[1].sessions,
+				tokens: (
+					a: [string, { tokens: number }],
+					b: [string, { tokens: number }],
+				) => b[1].tokens - a[1].tokens,
+			}[sort];
 
 			const entries = [...merged.entries()];
 			if (sortFn)

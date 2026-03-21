@@ -1,6 +1,9 @@
 import { Command } from "commander";
 import { close, getDb } from "../db/index";
 import { searchContent } from "../db/queries";
+import { resolveEnumOption } from "../utils/validation";
+
+const VALID_SCOPES = ["summaries", "research", "messages", "all"] as const;
 
 export const searchCommand = new Command("search")
 	.description("Search across session summaries, research, and messages")
@@ -12,9 +15,11 @@ export const searchCommand = new Command("search")
 	)
 	.option("--json", "Output as JSON")
 	.action(async (query, opts) => {
+		const scope = resolveEnumOption(opts.in, VALID_SCOPES, "in");
+
 		const db = await getDb();
 		try {
-			const results = await searchContent(db, query, opts.in);
+			const results = await searchContent(db, query, scope);
 
 			if (opts.json) {
 				console.log(JSON.stringify(results, null, 2));

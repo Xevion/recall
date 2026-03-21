@@ -2,9 +2,16 @@ import Table from "cli-table3";
 import { Command } from "commander";
 import { close, getDb } from "../db/index";
 import type { SessionRow } from "../db/queries";
-import { listSessions } from "../db/queries";
+import { getAvailableProjects, listSessions } from "../db/queries";
 import { extractProjectName } from "../utils/path";
 import { BORDERLESS_CHARS, c } from "../utils/theme";
+import {
+	parseIntOption,
+	parseRelativeDate,
+	resolveEnumOption,
+	resolveSourceOption,
+	suggestProject,
+} from "../utils/validation";
 
 const VALID_SORT_FIELDS = ["started", "duration", "turns", "messages"];
 const VALID_STATUSES = [
@@ -45,15 +52,10 @@ function hashStr(s: string): number {
 
 function parseSortBy(raw: string): { field: string; dir?: "asc" | "desc" } {
 	const parts = raw.split("/");
-	const field = parts[0] ?? "";
+	const field = resolveEnumOption(parts[0] ?? "", VALID_SORT_FIELDS, "sort-by");
 	const dir = parts[1];
-	if (!VALID_SORT_FIELDS.includes(field)) {
-		throw new Error(
-			`Invalid sort field "${field}". Valid: ${VALID_SORT_FIELDS.join(", ")}`,
-		);
-	}
-	if (dir && dir !== "asc" && dir !== "desc") {
-		throw new Error(`Invalid sort direction "${dir}". Use "asc" or "desc".`);
+	if (dir) {
+		resolveEnumOption(dir, ["asc", "desc"] as const, "sort-by direction");
 	}
 	return { field, dir: dir as "asc" | "desc" | undefined };
 }
@@ -268,32 +270,33 @@ export const sessionsCommand = new Command("sessions")
 			else if (opts.desc) sortDir = "desc";
 		}
 
-		if (opts.status && !VALID_STATUSES.includes(opts.status)) {
-			console.error(
-				c.catRed(
-					`Invalid status "${opts.status}". Valid: ${VALID_STATUSES.join(", ")}`,
-				),
-			);
-			process.exit(1);
-		}
+		const source = opts.source ? resolveSourceOption(opts.source) : undefined;
+		const status = opts.status
+			? resolveEnumOption(opts.status, VALID_STATUSES, "status")
+			: undefined;
+		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
+		const limit = parseIntOption(opts.limit, "limit");
+		const minTurns = opts.minTurns
+			? parseIntOption(opts.minTurns, "min-turns")
+			: undefined;
+		const minDuration = opts.minDuration
+			? parseIntOption(opts.minDuration, "min-duration")
+			: undefined;
+		const minMessages = opts.minMessages
+			? parseIntOption(opts.minMessages, "min-messages")
+			: undefined;
 
 		const db = await getDb();
 		try {
 			const sessions = await listSessions(db, {
 				project: opts.project,
-				source: opts.source,
-				since: opts.since,
-				limit: Number.parseInt(opts.limit, 10),
-				status: opts.status,
-				minTurns: opts.minTurns
-					? Number.parseInt(opts.minTurns, 10)
-					: undefined,
-				minDuration: opts.minDuration
-					? Number.parseInt(opts.minDuration, 10)
-					: undefined,
-				minMessages: opts.minMessages
-					? Number.parseInt(opts.minMessages, 10)
-					: undefined,
+				source,
+				since,
+				limit,
+				status,
+				minTurns,
+				minDuration,
+				minMessages,
 				sortBy: sortField,
 				sortDir,
 			});
@@ -302,6 +305,15 @@ export const sessionsCommand = new Command("sessions")
 				console.log(JSON.stringify(sessions, null, 2));
 			} else {
 				renderTable(sessions, !!opts.wide);
+				if (sessions.length === 0 && opts.project) {
+					const available = await getAvailableProjects(db);
+					const suggestions = suggestProject(opts.project, available);
+					if (suggestions.length > 0) {
+						console.log(
+							c.overlay1(`  Did you mean: ${suggestions.join(", ")}?`),
+						);
+					}
+				}
 			}
 		} finally {
 			await close();

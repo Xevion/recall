@@ -1,5 +1,8 @@
 import { Command } from "commander";
 import { all, close, getDb } from "../db/index";
+import { parseRelativeDate, resolveEnumOption } from "../utils/validation";
+
+const VALID_PERIODS = ["day", "week", "month"] as const;
 
 export const statsCommand = new Command("stats")
 	.description("Aggregate usage statistics")
@@ -7,20 +10,22 @@ export const statsCommand = new Command("stats")
 	.option("--by <period>", "Group by: day, week, month", "day")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
+		const period = resolveEnumOption(opts.by, VALID_PERIODS, "by");
+		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
+
 		const db = await getDb();
 		try {
-			const truncFn =
-				{
-					day: "date_trunc('day', started_at)",
-					week: "date_trunc('week', started_at)",
-					month: "date_trunc('month', started_at)",
-				}[opts.by as string] ?? "date_trunc('day', started_at)";
+			const truncFn = {
+				day: "date_trunc('day', started_at)",
+				week: "date_trunc('week', started_at)",
+				month: "date_trunc('month', started_at)",
+			}[period];
 
 			const conditions = ["parent_id IS NULL"];
 			const params: unknown[] = [];
-			if (opts.since) {
+			if (since) {
 				conditions.push("started_at >= ?");
-				params.push(opts.since);
+				params.push(since);
 			}
 
 			const where =

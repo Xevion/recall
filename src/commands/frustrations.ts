@@ -1,5 +1,9 @@
 import { Command } from "commander";
 import { all, close, getDb } from "../db/index";
+import { getAvailableProjects } from "../db/queries";
+import { extractProjectName } from "../utils/path";
+import { c } from "../utils/theme";
+import { parseRelativeDate, suggestProject } from "../utils/validation";
 
 export const frustrationsCommand = new Command("frustrations")
 	.description("Show detected frustrations and pain points")
@@ -8,6 +12,8 @@ export const frustrationsCommand = new Command("frustrations")
 	.option("--include-refused", "Include sessions where analysis was refused")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
+		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
+
 		const db = await getDb();
 		try {
 			const conditions = [
@@ -16,17 +22,17 @@ export const frustrationsCommand = new Command("frustrations")
 			];
 			const params: unknown[] = [];
 
-			if (opts.since) {
+			if (since) {
 				conditions.push("s.started_at >= ?");
-				params.push(opts.since);
+				params.push(since);
 			}
 			if (opts.project) {
-				conditions.push("s.project_name ILIKE ?");
-				params.push(`%${opts.project}%`);
+				conditions.push("(s.project_name ILIKE ? OR s.project_path ILIKE ?)");
+				params.push(`%${opts.project}%`, `%${opts.project}%`);
 			}
 
 			const query = `
-        SELECT s.id, s.project_name, s.started_at, a.frustrations, a.summary
+        SELECT s.id, s.project_path, s.project_name, s.started_at, a.frustrations, a.summary
         FROM analysis a
         JOIN session s ON a.session_id = s.id
         WHERE ${conditions.join(" AND ")}
@@ -36,7 +42,8 @@ export const frustrationsCommand = new Command("frustrations")
 
 			const results = await all<{
 				id: string;
-				project_name: string;
+				project_path: string | null;
+				project_name: string | null;
 				started_at: string;
 				frustrations: string[];
 				summary: string;
@@ -47,11 +54,22 @@ export const frustrationsCommand = new Command("frustrations")
 			} else {
 				if (results.length === 0) {
 					console.log("No frustrations detected.");
+					if (opts.project) {
+						const available = await getAvailableProjects(db);
+						const suggestions = suggestProject(opts.project, available);
+						if (suggestions.length > 0) {
+							console.log(
+								c.overlay1(`Did you mean: ${suggestions.join(", ")}?`),
+							);
+						}
+					}
 					return;
 				}
 				for (const r of results) {
+					const projectDisplay =
+						extractProjectName(r.project_path) ?? r.project_name ?? "unknown";
 					console.log(
-						`${r.project_name ?? "unknown"} — ${new Date(r.started_at).toLocaleDateString()}`,
+						`${projectDisplay} — ${new Date(r.started_at).toLocaleDateString()}`,
 					);
 					console.log(`  ${r.summary?.slice(0, 100) ?? ""}`);
 					for (const f of r.frustrations ?? []) {

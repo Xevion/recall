@@ -2,7 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
-import { debug, trace } from "../utils/logger";
+import { debug, error as logError, trace, warn } from "../utils/logger";
 import { buildAnalysisPrompt } from "./prompt";
 import { type AnalysisOutput, analysisSchema } from "./schema";
 import { type TriageInput, triageSession } from "./triage";
@@ -184,13 +184,14 @@ async function analyzeSession(
 
 		const prompt = await buildAnalysisPrompt(db, sessionId);
 		debug(`session ${sessionId}: prompt built (${prompt.length} chars)`);
-		trace(`session ${sessionId}: prompt preview:\n${prompt.slice(0, 500)}`);
+		trace(`session ${sessionId}: prompt preview:\n${truncate(prompt, 1000)}`);
 
 		const systemPrompt =
 			"You are a coding session analyst. Given a transcript of an AI coding assistant session, produce a structured JSON analysis. Be concise and factual. Focus on what was accomplished, relevant topics, any user frustrations or tool failures, and workflow observations.";
 
 		debug(`session ${sessionId}: querying ${config.analyze.model}`);
 		let output: AnalysisOutput | null = null;
+		let rawResultText: string | null = null;
 
 		for await (const message of query({
 			prompt: `Analyze this coding session transcript:\n\n${prompt}`,
@@ -202,7 +203,7 @@ async function analyzeSession(
 				thinking: { type: "disabled" },
 				persistSession: false,
 				settingSources: [],
-				maxTurns: 1,
+				maxTurns: 2,
 				effort: "low",
 				outputFormat: {
 					type: "json_schema",
@@ -214,26 +215,70 @@ async function analyzeSession(
 				`session ${sessionId}: sdk message type=${message.type}${"subtype" in message ? ` subtype=${message.subtype}` : ""}`,
 			);
 			if (message.type === "result") {
-				if (message.subtype === "success" && message.structured_output) {
-					output = message.structured_output as AnalysisOutput;
-					debug(
-						`session ${sessionId}: analysis complete — ${output.topics.length} topics, ${output.frustrations.length} frustrations`,
-					);
-					trace(`session ${sessionId}: summary: ${output.summary}`);
+				if (message.subtype === "success") {
+					rawResultText = message.result;
+					if (message.structured_output) {
+						output = message.structured_output as AnalysisOutput;
+						debug(
+							`session ${sessionId}: analysis complete — ${output.topics.length} topics, ${output.frustrations.length} frustrations`,
+						);
+						trace(`session ${sessionId}: summary: ${output.summary}`);
+					} else {
+						debug(`session ${sessionId}: success but no structured_output`);
+						trace(
+							`session ${sessionId}: raw result: ${truncate(message.result, 1000)}`,
+						);
+					}
 				} else {
 					debug(`session ${sessionId}: result subtype=${message.subtype}`);
-					if (message.subtype !== "success" && message.errors?.length) {
+					if (message.errors?.length) {
 						debug(`session ${sessionId}: errors: ${message.errors.join("; ")}`);
 					}
+				}
+			} else if (message.type === "rate_limit_event") {
+				const info = message.rate_limit_info;
+				const pct =
+					info.utilization != null
+						? `${Math.round(info.utilization * 100)}%`
+						: "?";
+				const resets = info.resetsAt
+					? new Date(info.resetsAt * 1000).toISOString()
+					: "?";
+				debug(
+					`session ${sessionId}: rate limit status=${info.status} utilization=${pct}`,
+				);
+				trace(
+					`session ${sessionId}: rate limit type=${info.rateLimitType ?? "?"} resets=${resets}`,
+				);
+				if (info.status === "allowed_warning") {
+					warn(`rate limit warning: ${pct} utilized, resets ${resets}`);
+				} else if (info.status === "rejected") {
+					logError(
+						`rate limit rejected: ${info.rateLimitType ?? "unknown"} quota exhausted, resets ${resets}`,
+					);
 				}
 			}
 		}
 
 		if (!output) {
-			debug(`session ${sessionId}: refused — no structured output`);
+			const isRefusal =
+				rawResultText != null &&
+				/\b(i can't|i cannot|i'm unable|refuse|inappropriate|not appropriate)\b/i.test(
+					rawResultText,
+				);
+			const raw = rawResultText ?? "";
+			const reason = isRefusal
+				? `Model refused: ${truncate(raw, 500)}`
+				: rawResultText
+					? `No structured output. Raw: ${truncate(raw, 500)}`
+					: "No structured output returned";
+			debug(
+				`session ${sessionId}: ${isRefusal ? "refused" : "no output"} — ${truncate(reason, 200)}`,
+			);
 			await run(
 				db,
-				"UPDATE analysis SET status = 'refused', error_reason = 'No structured output returned' WHERE session_id = ?",
+				"UPDATE analysis SET status = 'refused', error_reason = ? WHERE session_id = ?",
+				reason,
 				sessionId,
 			);
 			return "refused";
@@ -297,4 +342,8 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 		chunks.push(arr.slice(i, i + size));
 	}
 	return chunks;
+}
+
+function truncate(s: string, maxLen: number): string {
+	return s.length > maxLen ? `${s.slice(0, maxLen)} [truncated]` : s;
 }

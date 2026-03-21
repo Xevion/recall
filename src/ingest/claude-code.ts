@@ -127,6 +127,11 @@ async function parseClaudeCodeSession(
 	let lastRole = "";
 	let seq = 0;
 
+	// Track messages by API message ID to merge multi-event messages.
+	// Claude Code splits content blocks (thinking, tool_use, text) from a single
+	// API message into separate JSONL events sharing the same msg.id.
+	const messageById = new Map<string, number>();
+
 	for (const event of events) {
 		const type = event.type as string;
 		if (type !== "user" && type !== "assistant") continue;
@@ -147,42 +152,58 @@ async function parseClaudeCodeSession(
 		totalTokenInput += inputTokens;
 		totalTokenOutput += outputTokens;
 
+		const msgId = msg.id as string | undefined;
 		const contentBlocks = msg.content as
 			| Array<Record<string, unknown>>
 			| string
 			| undefined;
+
+		// Check if this event should merge into an existing message
+		const existingIdx = msgId != null ? messageById.get(msgId) : undefined;
+		if (existingIdx != null && existingIdx < messages.length) {
+			const existing = messages[existingIdx]!;
+			// Merge content blocks into the existing message
+			if (Array.isArray(contentBlocks)) {
+				const extraContent = processContentBlocks(
+					contentBlocks,
+					msgId ?? `msg-${existing.seq}`,
+					sessionId,
+					seq,
+					toolCalls,
+				);
+				if (extraContent.text) {
+					existing.content = existing.content
+						? `${existing.content}\n${extraContent.text}`
+						: extraContent.text;
+				}
+				if (extraContent.hasToolUse) existing.hasToolUse = true;
+			}
+			existing.tokenInput += inputTokens;
+			existing.tokenOutput += outputTokens;
+			continue;
+		}
+
 		let textContent = "";
 		let hasToolUse = false;
 
 		if (Array.isArray(contentBlocks)) {
-			for (const block of contentBlocks) {
-				if (block.type === "text") {
-					textContent += `${block.text as string}\n`;
-				} else if (block.type === "tool_use") {
-					hasToolUse = true;
-					toolCalls.push({
-						id: (block.id as string) ?? `tc-${seq}-${toolCalls.length}`,
-						messageId: (msg.id as string) ?? `msg-${seq}`,
-						sessionId,
-						toolName: block.name as string,
-						inputSummary: summarizeInput(
-							block.input as Record<string, unknown>,
-						),
-						isError: false,
-						durationMs: null,
-					});
-				} else if (block.type === "tool_result" && block.is_error) {
-					// Mark the corresponding tool call as errored
-					const tc = toolCalls.find((t) => t.id === block.tool_use_id);
-					if (tc) tc.isError = true;
-				}
-			}
+			const processed = processContentBlocks(
+				contentBlocks,
+				msgId ?? `msg-${seq}`,
+				sessionId,
+				seq,
+				toolCalls,
+			);
+			textContent = processed.text;
+			hasToolUse = processed.hasToolUse;
 		} else if (typeof contentBlocks === "string") {
 			textContent = contentBlocks;
 		}
 
+		const normalizedId = msgId ?? `msg-${seq}`;
+		const msgIdx = messages.length;
 		messages.push({
-			id: (msg.id as string) ?? `msg-${seq}`,
+			id: normalizedId,
 			sessionId,
 			role,
 			model: (msg.model as string) ?? null,
@@ -193,6 +214,9 @@ async function parseClaudeCodeSession(
 			content: textContent.trim() || null,
 			hasToolUse,
 		});
+		if (msgId != null) {
+			messageById.set(msgId, msgIdx);
+		}
 	}
 
 	// Skip sessions with no real messages (e.g. only file-history-snapshot events)
@@ -274,6 +298,42 @@ async function parseClaudeCodeSession(
 	};
 }
 
+function processContentBlocks(
+	blocks: Array<Record<string, unknown>>,
+	messageId: string,
+	sessionId: string,
+	seq: number,
+	toolCalls: NormalizedToolCall[],
+): { text: string; hasToolUse: boolean } {
+	let textContent = "";
+	let hasToolUse = false;
+
+	for (const block of blocks) {
+		if (block.type === "text") {
+			textContent += `${block.text as string}\n`;
+		} else if (block.type === "tool_use") {
+			hasToolUse = true;
+			toolCalls.push({
+				id: (block.id as string) ?? `tc-${seq}-${toolCalls.length}`,
+				messageId,
+				sessionId,
+				toolName: block.name as string,
+				inputSummary: summarizeInput(block.input as Record<string, unknown>),
+				isError: false,
+				durationMs: null,
+			});
+		} else if (block.type === "tool_result") {
+			const tc = toolCalls.find((t) => t.id === block.tool_use_id);
+			if (block.is_error && tc) tc.isError = true;
+			textContent += `${summarizeToolResult(block, tc)}\n`;
+		} else if (block.type === "thinking") {
+			textContent += "(thinking)\n";
+		}
+	}
+
+	return { text: textContent.trim(), hasToolUse };
+}
+
 function summarizeInput(
 	input: Record<string, unknown> | undefined,
 ): string | null {
@@ -285,4 +345,29 @@ function summarizeInput(
 	if (input.query) return `query: ${String(input.query).slice(0, 100)}`;
 	if (input.prompt) return `prompt: ${String(input.prompt).slice(0, 100)}`;
 	return JSON.stringify(input).slice(0, 100);
+}
+
+function summarizeToolResult(
+	block: Record<string, unknown>,
+	tc: NormalizedToolCall | undefined,
+): string {
+	const toolName = tc?.toolName ?? "unknown";
+	const errorTag = block.is_error ? " [ERROR]" : "";
+	const inputTag = tc?.inputSummary ? ` (${tc.inputSummary})` : "";
+
+	const rawContent =
+		typeof block.content === "string"
+			? block.content
+			: Array.isArray(block.content)
+				? (block.content as Array<Record<string, unknown>>)
+						.filter((b) => b.type === "text")
+						.map((b) => b.text)
+						.join("")
+				: "";
+
+	const trimmed = rawContent.trim();
+	const preview = trimmed.slice(0, 200);
+	const marker = trimmed.length > 200 ? " [truncated]" : "";
+
+	return `[${toolName}${errorTag}${inputTag}]: ${preview}${marker}`;
 }

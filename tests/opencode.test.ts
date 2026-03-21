@@ -1,8 +1,8 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database as SQLiteDB } from "bun:sqlite";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
 import { all } from "../src/db/index";
 import { ingestOpenCode } from "../src/ingest/opencode";
@@ -54,147 +54,131 @@ beforeAll(async () => {
 	`);
 
 	// Parent session
-	sqlite.run(
-		"INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)",
-		[PARENT_ID, "my-project", null, "/home/user/project", "Test session", NOW_MS, LATER_MS],
-	);
+	sqlite.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)", [
+		PARENT_ID,
+		"my-project",
+		null,
+		"/home/user/project",
+		"Test session",
+		NOW_MS,
+		LATER_MS,
+	]);
 	// Child/subagent session
-	sqlite.run(
-		"INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)",
-		[CHILD_ID, "my-project", PARENT_ID, "/home/user/project", "Sub session", NOW_MS + 10_000, LATER_MS - 10_000],
-	);
+	sqlite.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)", [
+		CHILD_ID,
+		"my-project",
+		PARENT_ID,
+		"/home/user/project",
+		"Sub session",
+		NOW_MS + 10_000,
+		LATER_MS - 10_000,
+	]);
 
 	// Messages for parent: user + assistant
-	sqlite.run(
-		"INSERT INTO message VALUES (?, ?, ?, ?, ?)",
-		[
-			"msg-u1",
-			PARENT_ID,
-			NOW_MS,
-			NOW_MS,
-			JSON.stringify({ role: "user" }),
-		],
-	);
-	sqlite.run(
-		"INSERT INTO message VALUES (?, ?, ?, ?, ?)",
-		[
-			"msg-a1",
-			PARENT_ID,
-			NOW_MS + 5000,
-			NOW_MS + 5000,
-			JSON.stringify({
-				role: "assistant",
-				modelID: "claude-sonnet-4-5",
-				tokens: { input: 100, output: 200 },
-			}),
-		],
-	);
+	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+		"msg-u1",
+		PARENT_ID,
+		NOW_MS,
+		NOW_MS,
+		JSON.stringify({ role: "user" }),
+	]);
+	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+		"msg-a1",
+		PARENT_ID,
+		NOW_MS + 5000,
+		NOW_MS + 5000,
+		JSON.stringify({
+			role: "assistant",
+			modelID: "claude-sonnet-4-5",
+			tokens: { input: 100, output: 200 },
+		}),
+	]);
 
 	// Messages for child: user + assistant
-	sqlite.run(
-		"INSERT INTO message VALUES (?, ?, ?, ?, ?)",
-		[
-			"msg-cu1",
-			CHILD_ID,
-			NOW_MS + 10_000,
-			NOW_MS + 10_000,
-			JSON.stringify({ role: "user" }),
-		],
-	);
-	sqlite.run(
-		"INSERT INTO message VALUES (?, ?, ?, ?, ?)",
-		[
-			"msg-ca1",
-			CHILD_ID,
-			NOW_MS + 15_000,
-			NOW_MS + 15_000,
-			JSON.stringify({ role: "assistant", modelID: "claude-sonnet-4-5", tokens: { input: 50, output: 75 } }),
-		],
-	);
+	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+		"msg-cu1",
+		CHILD_ID,
+		NOW_MS + 10_000,
+		NOW_MS + 10_000,
+		JSON.stringify({ role: "user" }),
+	]);
+	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+		"msg-ca1",
+		CHILD_ID,
+		NOW_MS + 15_000,
+		NOW_MS + 15_000,
+		JSON.stringify({
+			role: "assistant",
+			modelID: "claude-sonnet-4-5",
+			tokens: { input: 50, output: 75 },
+		}),
+	]);
 
 	// Parts for parent user message: text part
-	sqlite.run(
-		"INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-		[
-			"part-u1",
-			"msg-u1",
-			PARENT_ID,
-			NOW_MS,
-			NOW_MS,
-			JSON.stringify({ type: "text", text: "Hello from user" }),
-		],
-	);
+	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+		"part-u1",
+		"msg-u1",
+		PARENT_ID,
+		NOW_MS,
+		NOW_MS,
+		JSON.stringify({ type: "text", text: "Hello from user" }),
+	]);
 
 	// Parts for parent assistant message: text + tool (success)
-	sqlite.run(
-		"INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-		[
-			"part-a1-text",
-			"msg-a1",
-			PARENT_ID,
-			NOW_MS + 5000,
-			NOW_MS + 5000,
-			JSON.stringify({ type: "text", text: "Assist response" }),
-		],
-	);
-	sqlite.run(
-		"INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-		[
-			"part-a1-tool",
-			"msg-a1",
-			PARENT_ID,
-			NOW_MS + 5000,
-			NOW_MS + 5000,
-			JSON.stringify({
-				type: "tool",
-				callID: "tc-oc-001",
-				tool: "read",
-				state: { status: "done", input: { path: "/foo" } },
-			}),
-		],
-	);
+	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+		"part-a1-text",
+		"msg-a1",
+		PARENT_ID,
+		NOW_MS + 5000,
+		NOW_MS + 5000,
+		JSON.stringify({ type: "text", text: "Assist response" }),
+	]);
+	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+		"part-a1-tool",
+		"msg-a1",
+		PARENT_ID,
+		NOW_MS + 5000,
+		NOW_MS + 5000,
+		JSON.stringify({
+			type: "tool",
+			callID: "tc-oc-001",
+			tool: "read",
+			state: { status: "done", input: { path: "/foo" } },
+		}),
+	]);
 
 	// Parts for parent assistant: tool with error state
-	sqlite.run(
-		"INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-		[
-			"part-a1-tool-err",
-			"msg-a1",
-			PARENT_ID,
-			NOW_MS + 5000,
-			NOW_MS + 5000,
-			JSON.stringify({
-				type: "tool",
-				callID: "tc-oc-err",
-				tool: "bash",
-				state: { status: "error", input: { command: "exit 1" } },
-			}),
-		],
-	);
+	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+		"part-a1-tool-err",
+		"msg-a1",
+		PARENT_ID,
+		NOW_MS + 5000,
+		NOW_MS + 5000,
+		JSON.stringify({
+			type: "tool",
+			callID: "tc-oc-err",
+			tool: "bash",
+			state: { status: "error", input: { command: "exit 1" } },
+		}),
+	]);
 
 	// Parts for child messages
-	sqlite.run(
-		"INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-		[
-			"part-cu1",
-			"msg-cu1",
-			CHILD_ID,
-			NOW_MS + 10_000,
-			NOW_MS + 10_000,
-			JSON.stringify({ type: "text", text: "Sub user msg" }),
-		],
-	);
-	sqlite.run(
-		"INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
-		[
-			"part-ca1",
-			"msg-ca1",
-			CHILD_ID,
-			NOW_MS + 15_000,
-			NOW_MS + 15_000,
-			JSON.stringify({ type: "text", text: "Sub assistant msg" }),
-		],
-	);
+	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+		"part-cu1",
+		"msg-cu1",
+		CHILD_ID,
+		NOW_MS + 10_000,
+		NOW_MS + 10_000,
+		JSON.stringify({ type: "text", text: "Sub user msg" }),
+	]);
+	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+		"part-ca1",
+		"msg-ca1",
+		CHILD_ID,
+		NOW_MS + 15_000,
+		NOW_MS + 15_000,
+		JSON.stringify({ type: "text", text: "Sub assistant msg" }),
+	]);
 
 	sqlite.close();
 

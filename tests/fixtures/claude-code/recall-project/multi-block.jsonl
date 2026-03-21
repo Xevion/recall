@@ -1,0 +1,6 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:00.000Z","sessionId":"test-cc-multiblock","content":"Do something"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-01-01T00:00:00.000Z","sessionId":"test-cc-multiblock"}
+{"type":"user","isMeta":false,"sessionId":"test-cc-multiblock","cwd":"/projects/test","timestamp":"2026-01-01T00:00:00.000Z","message":{"role":"user","content":"Do something"}}
+{"type":"assistant","sessionId":"test-cc-multiblock","timestamp":"2026-01-01T00:00:05.000Z","message":{"id":"msg_shared","role":"assistant","model":"claude-opus-4-6","content":[{"type":"thinking","thinking":"Let me think about this"}],"usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"assistant","sessionId":"test-cc-multiblock","timestamp":"2026-01-01T00:00:06.000Z","message":{"id":"msg_shared","role":"assistant","model":"claude-opus-4-6","content":[{"type":"tool_use","id":"toolu_100","name":"StructuredOutput","input":{"result":"done"}}],"usage":{"input_tokens":0,"output_tokens":30}}}
+{"type":"user","isMeta":false,"sessionId":"test-cc-multiblock","timestamp":"2026-01-01T00:00:10.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_100","content":"Structured output provided successfully"}]}}

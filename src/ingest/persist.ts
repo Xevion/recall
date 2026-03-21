@@ -1,4 +1,4 @@
-import type { DuckDBConnection, DuckDBValue } from "@duckdb/node-api";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { withTransaction } from "../db/index";
 import type {
 	NormalizedMessage,
@@ -6,10 +6,19 @@ import type {
 	NormalizedToolCall,
 } from "./types";
 
+const MSG_SQL = `INSERT OR REPLACE INTO message
+	(id, session_id, role, model, seq, timestamp, token_input, token_output,
+	 content, has_tool_use)
+	VALUES ($id, $session_id, $role, $model, $seq, $timestamp, $token_input,
+	        $token_output, $content, $has_tool_use)`;
+
+const TC_SQL = `INSERT OR REPLACE INTO tool_call
+	(id, message_id, session_id, tool_name, input_summary, is_error, duration_ms)
+	VALUES ($id, $message_id, $session_id, $tool_name, $input_summary, $is_error, $duration_ms)`;
+
 /**
  * Persist a normalized session and all its related records to DuckDB.
  * All inserts are wrapped in a single transaction for atomicity and performance.
- * Prepared statements are reused across loop iterations.
  */
 export async function persistSession(
 	conn: DuckDBConnection,
@@ -43,32 +52,31 @@ export async function persistSession(
 			},
 		);
 
-		if (session.messages.length > 0) {
-			const msgStmt = await conn.prepare(
-				`INSERT OR REPLACE INTO message
-				 (id, session_id, role, model, seq, timestamp, token_input, token_output,
-				  content, has_tool_use)
-				 VALUES ($id, $session_id, $role, $model, $seq, $timestamp, $token_input,
-				         $token_output, $content, $has_tool_use)`,
-			);
-			for (const msg of session.messages) {
-				msgStmt.bind(buildMessageParams(msg));
-				await msgStmt.run();
-			}
-			msgStmt.destroySync();
+		for (const msg of session.messages) {
+			await conn.run(MSG_SQL, {
+				id: msg.id,
+				session_id: msg.sessionId,
+				role: msg.role,
+				model: msg.model,
+				seq: msg.seq,
+				timestamp: msg.timestamp?.toISOString() ?? null,
+				token_input: msg.tokenInput,
+				token_output: msg.tokenOutput,
+				content: msg.content,
+				has_tool_use: msg.hasToolUse,
+			});
 		}
 
-		if (session.toolCalls.length > 0) {
-			const tcStmt = await conn.prepare(
-				`INSERT OR REPLACE INTO tool_call
-				 (id, message_id, session_id, tool_name, input_summary, is_error, duration_ms)
-				 VALUES ($id, $message_id, $session_id, $tool_name, $input_summary, $is_error, $duration_ms)`,
-			);
-			for (const tc of session.toolCalls) {
-				tcStmt.bind(buildToolCallParams(tc));
-				await tcStmt.run();
-			}
-			tcStmt.destroySync();
+		for (const tc of session.toolCalls) {
+			await conn.run(TC_SQL, {
+				id: tc.id,
+				message_id: tc.messageId,
+				session_id: tc.sessionId,
+				tool_name: tc.toolName,
+				input_summary: tc.inputSummary,
+				is_error: tc.isError,
+				duration_ms: tc.durationMs,
+			});
 		}
 
 		if (session.subagent) {
@@ -94,35 +102,4 @@ export async function persistSession(
 			{ session_id: session.id },
 		);
 	});
-}
-
-function buildMessageParams(
-	msg: NormalizedMessage,
-): Record<string, DuckDBValue> {
-	return {
-		id: msg.id,
-		session_id: msg.sessionId,
-		role: msg.role,
-		model: msg.model,
-		seq: msg.seq,
-		timestamp: msg.timestamp?.toISOString() ?? null,
-		token_input: msg.tokenInput,
-		token_output: msg.tokenOutput,
-		content: msg.content,
-		has_tool_use: msg.hasToolUse,
-	};
-}
-
-function buildToolCallParams(
-	tc: NormalizedToolCall,
-): Record<string, DuckDBValue> {
-	return {
-		id: tc.id,
-		message_id: tc.messageId,
-		session_id: tc.sessionId,
-		tool_name: tc.toolName,
-		input_summary: tc.inputSummary,
-		is_error: tc.isError,
-		duration_ms: tc.durationMs,
-	};
 }

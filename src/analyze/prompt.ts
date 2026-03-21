@@ -11,6 +11,7 @@ export async function buildAnalysisPrompt(
 	sessionId: string,
 ): Promise<string> {
 	const messages = await all<{
+		id: string;
 		seq: number;
 		role: string;
 		model: string | null;
@@ -18,7 +19,7 @@ export async function buildAnalysisPrompt(
 		has_tool_use: boolean;
 	}>(
 		db,
-		`SELECT seq, role, model, content, has_tool_use FROM message
+		`SELECT id, seq, role, model, content, has_tool_use FROM message
      WHERE session_id = ? ORDER BY seq`,
 		sessionId,
 	);
@@ -90,8 +91,7 @@ export async function buildAnalysisPrompt(
 		lines.push(content);
 
 		if (msg.has_tool_use) {
-			const msgId = `msg-${msg.seq}`; // approximate
-			const tools = toolsByMessage.get(msgId) ?? [];
+			const tools = toolsByMessage.get(msg.id) ?? [];
 			for (const tc of tools) {
 				const errorTag = tc.is_error ? " [ERROR]" : "";
 				lines.push(`  → ${tc.tool_name}${errorTag}: ${tc.input_summary ?? ""}`);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { initSchema } from "../src/db/schema";
 import { all, withTransaction } from "../src/db/index";
+import { initSchema } from "../src/db/schema";
 
 describe("initSchema", () => {
 	test("calling initSchema twice on same connection succeeds", async () => {

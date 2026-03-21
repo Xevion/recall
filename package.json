@@ -14,15 +14,14 @@
     "check": "bun run --bun tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@types/bun": "latest",
     "typescript": "^5"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.81",
+    "@duckdb/node-api": "^1.5.0-r.1",
     "commander": "^14.0.3",
-    "duckdb": "^1.4.4",
     "smol-toml": "^1.6.0"
   }
 }

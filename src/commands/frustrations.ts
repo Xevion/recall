@@ -1,28 +1,31 @@
 import { Command } from "commander";
-import { getDb, close, all } from "../db/index";
+import { all, close, getDb } from "../db/index";
 
 export const frustrationsCommand = new Command("frustrations")
-  .description("Show detected frustrations and pain points")
-  .option("--since <date>", "Filter by date")
-  .option("-p, --project <name>", "Filter by project")
-  .option("--include-refused", "Include sessions where analysis was refused")
-  .option("--json", "Output as JSON")
-  .action(async (opts) => {
-    const db = await getDb();
-    try {
-      const conditions = ["a.status = 'complete'", "array_length(a.frustrations) > 0"];
-      const params: unknown[] = [];
+	.description("Show detected frustrations and pain points")
+	.option("--since <date>", "Filter by date")
+	.option("-p, --project <name>", "Filter by project")
+	.option("--include-refused", "Include sessions where analysis was refused")
+	.option("--json", "Output as JSON")
+	.action(async (opts) => {
+		const db = await getDb();
+		try {
+			const conditions = [
+				"a.status = 'complete'",
+				"array_length(a.frustrations) > 0",
+			];
+			const params: unknown[] = [];
 
-      if (opts.since) {
-        conditions.push("s.started_at >= ?");
-        params.push(opts.since);
-      }
-      if (opts.project) {
-        conditions.push("s.project_name ILIKE ?");
-        params.push(`%${opts.project}%`);
-      }
+			if (opts.since) {
+				conditions.push("s.started_at >= ?");
+				params.push(opts.since);
+			}
+			if (opts.project) {
+				conditions.push("s.project_name ILIKE ?");
+				params.push(`%${opts.project}%`);
+			}
 
-      let query = `
+			const query = `
         SELECT s.id, s.project_name, s.started_at, a.frustrations, a.summary
         FROM analysis a
         JOIN session s ON a.session_id = s.id
@@ -31,31 +34,33 @@ export const frustrationsCommand = new Command("frustrations")
         LIMIT 50
       `;
 
-      const results = await all<{
-        id: string;
-        project_name: string;
-        started_at: string;
-        frustrations: string[];
-        summary: string;
-      }>(db, query, ...params);
+			const results = await all<{
+				id: string;
+				project_name: string;
+				started_at: string;
+				frustrations: string[];
+				summary: string;
+			}>(db, query, ...params);
 
-      if (opts.json) {
-        console.log(JSON.stringify(results, null, 2));
-      } else {
-        if (results.length === 0) {
-          console.log("No frustrations detected.");
-          return;
-        }
-        for (const r of results) {
-          console.log(`${r.project_name ?? "unknown"} — ${new Date(r.started_at).toLocaleDateString()}`);
-          console.log(`  ${r.summary?.slice(0, 100) ?? ""}`);
-          for (const f of r.frustrations ?? []) {
-            console.log(`  ! ${f}`);
-          }
-          console.log();
-        }
-      }
-    } finally {
-      await close();
-    }
-  });
+			if (opts.json) {
+				console.log(JSON.stringify(results, null, 2));
+			} else {
+				if (results.length === 0) {
+					console.log("No frustrations detected.");
+					return;
+				}
+				for (const r of results) {
+					console.log(
+						`${r.project_name ?? "unknown"} — ${new Date(r.started_at).toLocaleDateString()}`,
+					);
+					console.log(`  ${r.summary?.slice(0, 100) ?? ""}`);
+					for (const f of r.frustrations ?? []) {
+						console.log(`  ! ${f}`);
+					}
+					console.log();
+				}
+			}
+		} finally {
+			await close();
+		}
+	});

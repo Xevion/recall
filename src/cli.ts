@@ -1,19 +1,20 @@
+#!/usr/bin/env bun
 import { Command } from "commander";
-import { ingestCommand } from "./commands/ingest";
 import { analyzeCommand } from "./commands/analyze";
+import { frustrationsCommand } from "./commands/frustrations";
+import { ingestCommand } from "./commands/ingest";
+import { projectsCommand } from "./commands/projects";
+import { researchCommand } from "./commands/research";
+import { searchCommand } from "./commands/search";
 import { sessionsCommand } from "./commands/sessions";
 import { showCommand } from "./commands/show";
-import { searchCommand } from "./commands/search";
-import { toolsCommand } from "./commands/tools";
-import { frustrationsCommand } from "./commands/frustrations";
-import { researchCommand } from "./commands/research";
-import { projectsCommand } from "./commands/projects";
 import { statsCommand } from "./commands/stats";
+import { toolsCommand } from "./commands/tools";
 
 const program = new Command()
-  .name("recall")
-  .description("Query and analyze AI coding assistant session history")
-  .version("0.1.0");
+	.name("recall")
+	.description("Query and analyze AI coding assistant session history")
+	.version("0.1.0");
 
 program.addCommand(ingestCommand);
 program.addCommand(analyzeCommand);

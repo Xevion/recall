@@ -2,89 +2,91 @@ import type duckdb from "duckdb";
 import { all } from "./index";
 
 export interface SessionRow {
-  id: string;
-  source: string;
-  parent_id: string | null;
-  project_name: string | null;
-  title: string | null;
-  started_at: string;
-  message_count: number;
-  turn_count: number;
-  token_input: number;
-  token_output: number;
-  duration_s: number;
+	id: string;
+	source: string;
+	parent_id: string | null;
+	project_name: string | null;
+	title: string | null;
+	started_at: string;
+	message_count: number;
+	turn_count: number;
+	token_input: number;
+	token_output: number;
+	duration_s: number;
 }
 
 export async function listSessions(
-  db: duckdb.Database,
-  opts: {
-    project?: string;
-    source?: string;
-    since?: string;
-    limit?: number;
-  },
+	db: duckdb.Database,
+	opts: {
+		project?: string;
+		source?: string;
+		since?: string;
+		limit?: number;
+	},
 ): Promise<SessionRow[]> {
-  const conditions: string[] = ["parent_id IS NULL"]; // exclude subagents from top-level list
-  const params: unknown[] = [];
+	const conditions: string[] = ["parent_id IS NULL"]; // exclude subagents from top-level list
+	const params: unknown[] = [];
 
-  if (opts.project) {
-    conditions.push("project_name ILIKE ?");
-    params.push(`%${opts.project}%`);
-  }
-  if (opts.source) {
-    conditions.push("source = ?");
-    params.push(opts.source);
-  }
-  if (opts.since) {
-    conditions.push("started_at >= ?");
-    params.push(opts.since);
-  }
+	if (opts.project) {
+		conditions.push("project_name ILIKE ?");
+		params.push(`%${opts.project}%`);
+	}
+	if (opts.source) {
+		conditions.push("source = ?");
+		params.push(opts.source);
+	}
+	if (opts.since) {
+		conditions.push("started_at >= ?");
+		params.push(opts.since);
+	}
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = opts.limit ?? 20;
+	const where =
+		conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+	const limit = opts.limit ?? 20;
 
-  return all<SessionRow>(
-    db,
-    `SELECT id, source, parent_id, project_name, title, started_at,
+	return all<SessionRow>(
+		db,
+		`SELECT id, source, parent_id, project_name, title, started_at,
             message_count, turn_count, token_input, token_output, duration_s
      FROM session ${where}
      ORDER BY started_at DESC
      LIMIT ?`,
-    ...params,
-    limit,
-  );
+		...params,
+		limit,
+	);
 }
 
 export async function getToolStats(
-  db: duckdb.Database,
-  opts: {
-    since?: string;
-    project?: string;
-    sort?: "frequency" | "errors" | "duration";
-  },
+	db: duckdb.Database,
+	opts: {
+		since?: string;
+		project?: string;
+		sort?: "frequency" | "errors" | "duration";
+	},
 ) {
-  const conditions: string[] = [];
-  const params: unknown[] = [];
+	const conditions: string[] = [];
+	const params: unknown[] = [];
 
-  if (opts.since) {
-    conditions.push("s.started_at >= ?");
-    params.push(opts.since);
-  }
-  if (opts.project) {
-    conditions.push("s.project_name ILIKE ?");
-    params.push(`%${opts.project}%`);
-  }
+	if (opts.since) {
+		conditions.push("s.started_at >= ?");
+		params.push(opts.since);
+	}
+	if (opts.project) {
+		conditions.push("s.project_name ILIKE ?");
+		params.push(`%${opts.project}%`);
+	}
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const orderBy = {
-    frequency: "call_count DESC",
-    errors: "error_count DESC",
-    duration: "avg_duration_ms DESC",
-  }[opts.sort ?? "frequency"];
+	const where =
+		conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+	const orderBy = {
+		frequency: "call_count DESC",
+		errors: "error_count DESC",
+		duration: "avg_duration_ms DESC",
+	}[opts.sort ?? "frequency"];
 
-  return all(
-    db,
-    `SELECT
+	return all(
+		db,
+		`SELECT
        tc.tool_name,
        COUNT(*) as call_count,
        SUM(CASE WHEN tc.is_error THEN 1 ELSE 0 END) as error_count,
@@ -95,72 +97,77 @@ export async function getToolStats(
      ${where}
      GROUP BY tc.tool_name
      ORDER BY ${orderBy}`,
-    ...params,
-  );
+		...params,
+	);
 }
 
 export async function searchContent(
-  db: duckdb.Database,
-  query: string,
-  scope: "summaries" | "research" | "messages" | "all" = "summaries",
+	db: duckdb.Database,
+	query: string,
+	scope: "summaries" | "research" | "messages" | "all" = "summaries",
 ) {
-  const results: Array<{ source_type: string; id: string; snippet: string; context: string }> = [];
-  const pattern = `%${query}%`;
+	const results: Array<{
+		source_type: string;
+		id: string;
+		snippet: string;
+		context: string;
+	}> = [];
+	const pattern = `%${query}%`;
 
-  if (scope === "summaries" || scope === "all") {
-    const rows = await all<{ session_id: string; summary: string }>(
-      db,
-      `SELECT session_id, summary FROM analysis
+	if (scope === "summaries" || scope === "all") {
+		const rows = await all<{ session_id: string; summary: string }>(
+			db,
+			`SELECT session_id, summary FROM analysis
        WHERE summary ILIKE ? AND status = 'complete'
        LIMIT 20`,
-      pattern,
-    );
-    for (const row of rows) {
-      results.push({
-        source_type: "summary",
-        id: row.session_id,
-        snippet: row.summary,
-        context: "analysis",
-      });
-    }
-  }
+			pattern,
+		);
+		for (const row of rows) {
+			results.push({
+				source_type: "summary",
+				id: row.session_id,
+				snippet: row.summary,
+				context: "analysis",
+			});
+		}
+	}
 
-  if (scope === "research" || scope === "all") {
-    const rows = await all<{ id: string; topic: string; content: string }>(
-      db,
-      `SELECT id, topic, content FROM research_artifact
+	if (scope === "research" || scope === "all") {
+		const rows = await all<{ id: string; topic: string; content: string }>(
+			db,
+			`SELECT id, topic, content FROM research_artifact
        WHERE content ILIKE ? OR topic ILIKE ?
        LIMIT 20`,
-      pattern,
-      pattern,
-    );
-    for (const row of rows) {
-      results.push({
-        source_type: "research",
-        id: row.id,
-        snippet: row.topic,
-        context: row.content.slice(0, 200),
-      });
-    }
-  }
+			pattern,
+			pattern,
+		);
+		for (const row of rows) {
+			results.push({
+				source_type: "research",
+				id: row.id,
+				snippet: row.topic,
+				context: row.content.slice(0, 200),
+			});
+		}
+	}
 
-  if (scope === "messages" || scope === "all") {
-    const rows = await all<{ id: string; session_id: string; content: string }>(
-      db,
-      `SELECT id, session_id, content FROM message
+	if (scope === "messages" || scope === "all") {
+		const rows = await all<{ id: string; session_id: string; content: string }>(
+			db,
+			`SELECT id, session_id, content FROM message
        WHERE content ILIKE ?
        LIMIT 20`,
-      pattern,
-    );
-    for (const row of rows) {
-      results.push({
-        source_type: "message",
-        id: row.session_id,
-        snippet: row.content.slice(0, 200),
-        context: `message ${row.id}`,
-      });
-    }
-  }
+			pattern,
+		);
+		for (const row of rows) {
+			results.push({
+				source_type: "message",
+				id: row.session_id,
+				snippet: row.content.slice(0, 200),
+				context: `message ${row.id}`,
+			});
+		}
+	}
 
-  return results;
+	return results;
 }

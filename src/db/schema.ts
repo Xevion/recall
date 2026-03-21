@@ -88,13 +88,12 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 `;
 
 export async function initSchema(db: duckdb.Database): Promise<void> {
-  // DuckDB doesn't support multi-statement run, split by semicolons
-  const statements = SCHEMA_SQL
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+	// DuckDB doesn't support multi-statement run, split by semicolons
+	const statements = SCHEMA_SQL.split(";")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
 
-  for (const stmt of statements) {
-    await run(db, stmt + ";");
-  }
+	for (const stmt of statements) {
+		await run(db, stmt + ";");
+	}
 }

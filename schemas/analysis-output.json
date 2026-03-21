@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["summary", "topics", "frustrations", "workflow_notes", "is_research_subagent"],
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "2-3 sentence summary of what was accomplished in this session"
+    },
+    "topics": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "3-8 topic tags for this session (e.g. 'authentication', 'database-migration', 'react-components')"
+    },
+    "frustrations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Detected pain points: repeated failures, backtracking, user corrections, tool misuse. Empty array if none."
+    },
+    "workflow_notes": {
+      "type": "string",
+      "description": "Observations about tool usage patterns, workflow efficiency, configuration issues. Focus on actionable insights."
+    },
+    "is_research_subagent": {
+      "type": "boolean",
+      "description": "True if this session is a subagent doing research/exploration/evaluation work"
+    },
+    "research_topic": {
+      "type": ["string", "null"],
+      "description": "If is_research_subagent is true, the topic being researched. Null otherwise."
+    },
+    "research_tags": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "description": "If is_research_subagent is true, searchable tags for the research. Null otherwise."
+    }
+  }
+}

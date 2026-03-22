@@ -32,7 +32,7 @@ Do NOT write temp bun/ts scripts to query the database. The duckdb binary is fas
 
 ```
 bun run src/cli.ts <command>     # development
-recall <command>                  # after bun build --compile
+recall <command>                  # after bun link
 ```
 
 Global flags: `-v`/`-vv`/`-vvv` (verbosity), `-q` (quiet), `--log-file <path>` (JSONL log output).

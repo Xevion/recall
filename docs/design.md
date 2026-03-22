@@ -562,7 +562,18 @@ Follows XDG Base Directory spec (`$XDG_DATA_HOME/recall/`).
 
 ## Distribution
 
-Primary: `bun install -g` with `#!/usr/bin/env bun` shebang on `src/cli.ts`.
+Primary: `bun link` from the project directory, which registers the `bin` entry
+from `package.json` and creates a symlink at `~/.bun/bin/recall` pointing to
+`src/cli.ts` (which has a `#!/usr/bin/env bun` shebang).
+
+```bash
+cd /path/to/recall
+bun link              # registers globally — recall is now available
+```
+
+Note: `bun install -g .` does NOT work for local packages (silently no-ops as of
+Bun 1.3.9). Use `bun link` instead.
+
 The `@duckdb/node-api` package includes platform-specific prebuilt binaries via
 optional dependencies (linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64).
 

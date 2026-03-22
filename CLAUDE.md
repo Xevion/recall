@@ -15,6 +15,7 @@ Two-phase pipeline:
 - **Config**: TOML at `~/.local/share/recall/config.toml`
 - **AI**: `@anthropic-ai/claude-agent-sdk` with JSON schema output
 - **CLI**: Commander
+- **Logging**: LogTape (`@logtape/logtape`) — colored stderr sink + optional JSONL file sink
 - **Tooling**: mise (`mise.toml` manages duckdb binary)
 
 ## Database Queries (Ad-hoc)
@@ -34,36 +35,89 @@ bun run src/cli.ts <command>     # development
 recall <command>                  # after bun build --compile
 ```
 
+Global flags: `-v`/`-vv`/`-vvv` (verbosity), `-q` (quiet), `--log-file <path>` (JSONL log output).
+
+### Available Subcommands
+
+- `ingest` — parse and store sessions from Claude Code JSONL / OpenCode SQLite
+- `analyze` — run LLM analysis on pending sessions
+- `export` — export session data
+- `fts` — manage full-text search indexes (rebuild, check)
+- `sessions` — list/filter sessions with rich table output
+- `show` — show detail for a single session
+- `search` — full-text search across messages, analysis, research
+- `tools` — tool call statistics
+- `frustrations` — list frustration events from analysis
+- `research` — list research artifacts
+- `projects` — list projects with session counts
+- `stats` — aggregate usage statistics
+
 ## Key Files
 
-- `src/cli.ts` — entry point, command routing
+- `src/cli.ts` — entry point, command routing, global flags
 - `src/config.ts` — TOML config loading
-- `src/db/schema.ts` — DuckDB table definitions
-- `src/db/index.ts` — DuckDB connection helpers (`run`, `all`)
+- `src/db/schema.ts` — DuckDB table definitions and enum init
+- `src/db/index.ts` — DuckDB connection helpers (`run`, `all`, `withDb`)
 - `src/db/queries.ts` — reusable query functions
+- `src/db/fts.ts` — FTS index build/check helpers
 - `src/ingest/index.ts` — ingest orchestration and shared types
-- `src/ingest/types.ts` — normalized type definitions (NormalizedSession, etc.)
+- `src/ingest/types.ts` — normalized type definitions (`NormalizedSession`, etc.)
 - `src/ingest/persist.ts` — shared `persistSession` used by both parsers
 - `src/ingest/claude-code.ts` — Claude Code JSONL parser
 - `src/ingest/opencode.ts` — OpenCode SQLite reader
-- `src/analyze/index.ts` — SDK orchestration (chunked Promise.all)
+- `src/analyze/index.ts` — SDK orchestration (chunked `Promise.all`)
 - `src/analyze/triage.ts` — skip/analyze decision logic
 - `src/analyze/prompt.ts` — LLM prompt construction
 - `src/analyze/research.ts` — research artifact extraction
-- `src/analyze/schema.ts` — JSON schema helpers for LLM output
+- `src/analyze/schema.ts` — `AnalysisOutput` type and JSON schema export
+- `src/analyze/topics.ts` — seeded topic vocabulary (`category:tag` format)
+- `src/logging/setup.ts` — LogTape configure/teardown
+- `src/logging/sink.ts` — custom colored stderr sink
 - `src/commands/` — one file per CLI subcommand
-- `src/utils/` — path, logger, validation helpers
+- `src/utils/theme.ts` — shared ansis color theme
+- `src/utils/colors.ts` — color helpers
+- `src/utils/table.ts` — cli-table3 helpers
+- `src/utils/format.ts` — formatting utilities (dates, durations, word wrap)
+- `src/utils/path.ts` — path helpers
+- `src/utils/validation.ts` — `ValidationError` and input validation
 - `schemas/analysis-output.json` — JSON schema for LLM analysis output
 - `docs/design.md` — full design document
 
+## Analysis Schema
+
+`AnalysisOutput` fields (from `src/analyze/schema.ts`):
+
+| Field | Type | Notes |
+|---|---|---|
+| `title` | `string` | short session title |
+| `summary` | `string` | prose summary |
+| `outcome` | `completed \| progressed \| abandoned \| pivoted` | overall session outcome |
+| `outcome_confidence` | `high \| medium \| low` | confidence in outcome |
+| `session_types` | `SessionType[]` | `implementation`, `exploration`, `debugging`, `planning`, `review`, `maintenance`, `research` |
+| `topics` | `string[]` | `category:tag` format, from vocabulary in `topics.ts` |
+| `frustrations` | `Frustration[]` | `{ category, description, severity }` — categories: `tool_failure`, `user_correction`, `external_blocker`, `workflow_antipattern` |
+| `actionable_insight` | `string \| null` | single improvement suggestion |
+| `is_research_subagent` | `boolean` | whether this is a research subagent |
+| `research_topic` / `research_tags` | `string \| null` | populated when `is_research_subagent` is true |
+
 ## Conventions
 
-- Analysis statuses: pending, processing, complete, skipped, error, refused, retry_pending
+- Analysis statuses: `pending`, `processing`, `complete`, `skipped`, `error`, `refused`, `retry_pending`
+- Topics use two-tier `category:tag` format; vocabulary seeded in `src/analyze/topics.ts`
 - OpenCode session IDs are prefixed with `oc-` to avoid collisions
 - Subagents are sessions with `parent_id` set; metadata in `subagent` table
 - Research artifacts auto-extracted from subagents matching prompt signal patterns
 - Ingest is idempotent via `ingest_log` (keyed on `source_path` + `file_mtime` for claude-code, `session_id` for opencode)
 - Subagent metadata read from `.meta.json` companion files alongside JSONL (claude-code only)
+- FTS indexes cover `message(content)`, `analysis(title, summary, actionable_insight)`, `research_artifact(topic, content)` — rebuilt via `fts` command or on demand
+
+## Full-Text Search
+
+DuckDB FTS extension is loaded at schema init. Three indexes are managed in `src/db/fts.ts`. Rebuild with:
+
+```bash
+recall fts rebuild
+```
 
 ## Linear Issue Tracking
 

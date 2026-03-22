@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { analyzeCommand } from "./commands/analyze";
+import { contextCommand } from "./commands/context";
 import { exportCommand } from "./commands/export";
 import { frustrationsCommand } from "./commands/frustrations";
 import { ftsCommand } from "./commands/fts";
@@ -39,6 +40,7 @@ const program = new Command()
 
 program.addCommand(ingestCommand);
 program.addCommand(analyzeCommand);
+program.addCommand(contextCommand);
 program.addCommand(exportCommand);
 program.addCommand(ftsCommand);
 program.addCommand(sessionsCommand);

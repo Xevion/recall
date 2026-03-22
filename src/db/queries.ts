@@ -513,6 +513,155 @@ export async function searchSessions(
  * Get distinct human-readable project names from all sessions.
  * Used for "did you mean?" suggestions when --project matches nothing.
  */
+export interface ContextSession {
+	id: string;
+	title: string | null;
+	summary: string | null;
+	outcome: string | null;
+	outcome_confidence: string | null;
+	session_types: string[] | null;
+	topics: string[] | null;
+	frustrations: { category: string; description: string; severity: string }[];
+	actionable_insight: string | null;
+	started_at: string;
+	duration_s: number;
+	turn_count: number;
+	message_count: number;
+}
+
+export interface ProjectContext {
+	project: string;
+	generated_at: string;
+	session_count: number;
+	sessions: ContextSession[];
+	topic_frequency: Record<string, number>;
+	unanalyzed_count: number;
+}
+
+export interface GetProjectContextOpts {
+	project: string;
+	since?: string;
+	limit?: number;
+}
+
+function parseFrustrations(
+	raw: unknown,
+): { category: string; description: string; severity: string }[] {
+	if (raw == null) return [];
+	try {
+		const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+		if (Array.isArray(parsed)) return parsed;
+		return [];
+	} catch {
+		return [];
+	}
+}
+
+export async function getProjectContext(
+	db: DuckDBConnection,
+	opts: GetProjectContextOpts,
+): Promise<ProjectContext> {
+	const conditions: string[] = ["s.parent_id IS NULL", "a.status = 'complete'"];
+	const params: unknown[] = [];
+
+	const escaped = escapeLike(opts.project);
+	conditions.push(
+		"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
+	);
+	params.push(`%${escaped}%`, `%${escaped}%`);
+
+	if (opts.since) {
+		conditions.push("s.started_at >= ?");
+		params.push(opts.since);
+	}
+
+	const limit = opts.limit ?? 10;
+	const where = `WHERE ${conditions.join(" AND ")}`;
+
+	const rows = await all<{
+		id: string;
+		title: string | null;
+		summary: string | null;
+		outcome: string | null;
+		outcome_confidence: string | null;
+		session_types: string[] | null;
+		topics: string[] | null;
+		frustrations: unknown;
+		actionable_insight: string | null;
+		started_at: string;
+		duration_s: number;
+		turn_count: number;
+		message_count: number;
+	}>(
+		db,
+		`SELECT s.id, a.title, a.summary, a.outcome, a.outcome_confidence,
+		        a.session_types, a.topics, a.frustrations, a.actionable_insight,
+		        s.started_at, s.duration_s, s.turn_count, s.message_count
+		 FROM session s
+		 JOIN analysis a ON a.session_id = s.id
+		 ${where}
+		 ORDER BY s.started_at DESC
+		 LIMIT ?`,
+		...params,
+		limit,
+	);
+
+	const sessions: ContextSession[] = rows.map((row) => ({
+		...row,
+		frustrations: parseFrustrations(row.frustrations),
+	}));
+
+	const topicFrequency: Record<string, number> = {};
+	for (const session of sessions) {
+		if (session.topics) {
+			for (const topic of session.topics) {
+				topicFrequency[topic] = (topicFrequency[topic] ?? 0) + 1;
+			}
+		}
+	}
+
+	// Count unanalyzed sessions for the same project/since filters
+	const unanalyzedConditions: string[] = [
+		"s.parent_id IS NULL",
+		"a.status IN ('pending', 'retry_pending')",
+	];
+	const unanalyzedParams: unknown[] = [];
+
+	unanalyzedConditions.push(
+		"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
+	);
+	unanalyzedParams.push(`%${escaped}%`, `%${escaped}%`);
+
+	if (opts.since) {
+		unanalyzedConditions.push("s.started_at >= ?");
+		unanalyzedParams.push(opts.since);
+	}
+
+	const unanalyzedWhere = `WHERE ${unanalyzedConditions.join(" AND ")}`;
+	const unanalyzedRows = await all<{ cnt: number }>(
+		db,
+		`SELECT COUNT(*) as cnt
+		 FROM session s
+		 JOIN analysis a ON a.session_id = s.id
+		 ${unanalyzedWhere}`,
+		...unanalyzedParams,
+	);
+	const unanalyzedCount = Number(unanalyzedRows[0]?.cnt ?? 0);
+
+	return {
+		project: opts.project,
+		generated_at: new Date().toISOString(),
+		session_count: sessions.length,
+		sessions,
+		topic_frequency: topicFrequency,
+		unanalyzed_count: unanalyzedCount,
+	};
+}
+
+/**
+ * Get distinct human-readable project names from all sessions.
+ * Used for "did you mean?" suggestions when --project matches nothing.
+ */
 export async function getAvailableProjects(
 	db: DuckDBConnection,
 ): Promise<string[]> {

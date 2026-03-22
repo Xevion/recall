@@ -36,13 +36,23 @@ interface SessionDetail {
 	source_path: string;
 }
 
+interface FrustrationDetail {
+	category: string;
+	description: string;
+	severity: string;
+}
+
 interface AnalysisDetail {
 	session_id: string;
 	status: string;
+	title: string | null;
 	summary: string | null;
+	outcome: string | null;
+	outcome_confidence: string | null;
+	session_types: string[] | null;
 	topics: string[] | null;
-	frustrations: string[] | null;
-	workflow_notes: string | null;
+	frustrations: string | null;
+	actionable_insight: string | null;
 }
 
 interface SubagentRow {
@@ -187,12 +197,39 @@ export const showCommand = new Command("show")
 				const a = analysis[0];
 				if (a) {
 					console.log(`\n${c.text.bold("Analysis")} ${colorStatus(a.status)}`);
+					if (a.title) kvWrap("Title", a.title, c.text);
 					if (a.summary) kvWrap("Summary", a.summary, c.subtext0);
+					if (a.outcome)
+						kv(
+							"Outcome",
+							`${c.subtext0(a.outcome)} ${c.overlay0(`(${a.outcome_confidence ?? "?"})`)}`,
+						);
+					if (a.session_types?.length)
+						kvWrap("Type", a.session_types.join(", "), c.subtext0);
 					if (a.topics?.length)
 						kvWrap("Topics", a.topics.join(", "), c.subtext0);
-					if (a.frustrations?.length)
-						kvList("Issues", a.frustrations, c.catYellow);
-					if (a.workflow_notes) kvWrap("Notes", a.workflow_notes, c.subtext0);
+					if (a.frustrations) {
+						let items: FrustrationDetail[];
+						try {
+							items =
+								typeof a.frustrations === "string"
+									? JSON.parse(a.frustrations)
+									: a.frustrations;
+						} catch {
+							items = [];
+						}
+						if (items.length > 0) {
+							kvList(
+								"Issues",
+								items.map(
+									(f) => `[${f.severity}/${f.category}] ${f.description}`,
+								),
+								c.catYellow,
+							);
+						}
+					}
+					if (a.actionable_insight)
+						kvWrap("Insight", a.actionable_insight, c.subtext0);
 				}
 
 				if (subagents.length > 0) {

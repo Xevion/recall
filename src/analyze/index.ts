@@ -21,9 +21,40 @@ function stripSchemaDirective(
 	return rest;
 }
 
+const SYSTEM_PROMPT = `You are a coding session analyst. Given a transcript of an AI coding assistant session, produce a structured JSON analysis.
+
+Rules:
+- title: One phrase, under 80 characters, no period. Like a git commit subject.
+- summary: 1-2 sentences, under 40 words. First sentence: what was accomplished (not how). Second sentence: the single most important challenge, decision, or blocker — omit if the session was straightforward.
+- outcome: Relative to the session's apparent intent. Exploratory sessions that answered the question = completed. Planning sessions that produced a plan = completed.
+- outcome_confidence: 'high' = clear intent and clear resolution. 'medium' = intent is clear but outcome is ambiguous (e.g., work was done but unclear if the user was satisfied). 'low' = session intent itself is unclear, or the transcript is too truncated to judge.
+- session_types: What kind of work, not what tools were used. Use multiple if the session pivoted.
+- topics: Use the provided vocabulary. Format as "category:tag". Mint new tags within a category only when nothing fits.
+- frustrations: Only include genuine frustrations. Categorize precisely:
+  - tool_failure: Tool errors, retries, crashes
+  - user_correction: User corrected the assistant's approach or output
+  - external_blocker: Rate limits, missing permissions, network issues
+  - workflow_antipattern: Inefficient patterns (sequential reads, not checking --help, unnecessary re-reads)
+  Omit frustrations that are routine infrastructure noise: ToolSearch needing multiple calls to resolve, single WebFetch timeouts that were retried successfully, transient MCP tool errors. Only report frustrations that visibly cost turns, required backtracking, or blocked progress.
+- actionable_insight: One concrete sentence for future sessions. Null if nothing novel. Must not restate what's already in the summary or frustrations.
+- Be concise and factual. Do not pad fields to fill space.`;
+
+const SUBAGENT_SYSTEM_PROMPT = `You are a coding session analyst. Given a transcript of a subagent session (a child process dispatched by a parent AI assistant), produce a structured JSON analysis.
+
+For subagent sessions, focus on:
+- title: What the subagent was tasked to do, one phrase
+- summary: What it found or accomplished, 2 sentences
+- outcome: Did it answer the parent's question / complete the delegated task?
+- topics: Use the provided vocabulary, "category:tag" format
+- frustrations: Empty array (subagent friction is rarely actionable)
+- actionable_insight: Always null for subagents
+- is_research_subagent: True if the subagent was doing research/exploration
+
+Be concise.`;
+
 export interface AnalyzeOptions {
 	limit?: number;
-	force?: string; // force re-analyze a specific session ID
+	force?: string;
 }
 
 export interface AnalyzeResult {
@@ -89,7 +120,6 @@ export async function analyze(
 			 FROM session s WHERE s.id = ?`,
 			opts.force,
 		);
-		// Reset analysis status
 		await run(
 			db,
 			"UPDATE analysis SET status = 'pending', retry_count = 0 WHERE session_id = ?",
@@ -117,6 +147,7 @@ export async function analyze(
 
 	const toAnalyze: CandidateSession[] = [];
 	for (const session of sessions) {
+		const isSubagent = session.parent_id != null;
 		const input: TriageInput = {
 			sessionId: session.id,
 			messageCount: session.message_count ?? 0,
@@ -125,6 +156,7 @@ export async function analyze(
 			hasToolCalls: session.has_tool_calls,
 			hasSubagents: session.has_subagents,
 			hasErrors: session.has_errors,
+			isSubagent,
 		};
 
 		const decision = triageSession(input, config.analyze.triage);
@@ -200,9 +232,11 @@ export async function analyze(
 async function analyzeSession(
 	db: DuckDBConnection,
 	sessionId: string,
-	_parentId: string | null,
+	parentId: string | null,
 	config: Awaited<ReturnType<typeof loadConfig>>,
 ): Promise<"complete" | "refused" | "error"> {
+	const isSubagent = parentId != null;
+
 	try {
 		await run(
 			db,
@@ -210,7 +244,7 @@ async function analyzeSession(
 			sessionId,
 		);
 
-		const prompt = await buildAnalysisPrompt(db, sessionId);
+		const prompt = await buildAnalysisPrompt(db, sessionId, isSubagent);
 		logger.debug("Session {sessionId}: prompt built ({chars} chars)", {
 			sessionId,
 			chars: prompt.length,
@@ -220,13 +254,16 @@ async function analyzeSession(
 			preview: truncate(prompt, 1000),
 		});
 
-		const systemPrompt =
-			"You are a coding session analyst. Given a transcript of an AI coding assistant session, produce a structured JSON analysis. Be concise and factual. Focus on what was accomplished, relevant topics, any user frustrations or tool failures, and workflow observations.";
+		const systemPrompt = isSubagent ? SUBAGENT_SYSTEM_PROMPT : SYSTEM_PROMPT;
 
-		logger.debug("Session {sessionId}: querying {model}", {
-			sessionId,
-			model: config.analyze.model,
-		});
+		logger.debug(
+			"Session {sessionId}: querying {model} (subagent={isSubagent})",
+			{
+				sessionId,
+				model: config.analyze.model,
+				isSubagent,
+			},
+		);
 		let output: AnalysisOutput | null = null;
 		let rawResultText: string | null = null;
 
@@ -258,16 +295,17 @@ async function analyzeSession(
 					if (message.structured_output) {
 						output = message.structured_output as AnalysisOutput;
 						logger.debug(
-							"Session {sessionId}: analysis complete — {topics} topics, {frustrations} frustrations",
+							"Session {sessionId}: analysis complete — {topics} topics, {frustrations} frustrations, outcome={outcome}",
 							{
 								sessionId,
 								topics: output.topics.length,
 								frustrations: output.frustrations.length,
+								outcome: output.outcome,
 							},
 						);
-						logger.trace("Session {sessionId}: summary: {summary}", {
+						logger.trace("Session {sessionId}: title: {title}", {
 							sessionId,
-							summary: output.summary,
+							title: output.title,
 						});
 					} else {
 						logger.debug(
@@ -367,17 +405,25 @@ async function analyzeSession(
 			db,
 			`UPDATE analysis SET
 				status = 'complete',
+				title = ?,
 				summary = ?,
+				outcome = ?,
+				outcome_confidence = ?,
+				session_types = ?::JSON::TEXT[],
 				topics = ?::JSON::TEXT[],
-				frustrations = ?::JSON::TEXT[],
-				workflow_notes = ?,
+				frustrations = ?::JSON,
+				actionable_insight = ?,
 				analyzed_at = now(),
 				analyzer_model = ?
 			WHERE session_id = ?`,
+			output.title,
 			output.summary,
+			output.outcome,
+			output.outcome_confidence,
+			JSON.stringify(output.session_types),
 			JSON.stringify(output.topics),
 			JSON.stringify(output.frustrations),
-			output.workflow_notes,
+			output.actionable_insight,
 			config.analyze.model,
 			sessionId,
 		);

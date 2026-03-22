@@ -25,13 +25,23 @@ interface SessionDetail {
 	source_path: string;
 }
 
+interface FrustrationItem {
+	category: string;
+	description: string;
+	severity: string;
+}
+
 interface AnalysisDetail {
 	session_id: string;
 	status: string;
+	title: string | null;
 	summary: string | null;
+	outcome: string | null;
+	outcome_confidence: string | null;
+	session_types: string[] | null;
 	topics: string[] | null;
-	frustrations: string[] | null;
-	workflow_notes: string | null;
+	frustrations: string | null;
+	actionable_insight: string | null;
 }
 
 interface MessageRow {
@@ -181,24 +191,49 @@ function renderMarkdown(
 	if (analysis) {
 		lines.push("");
 		lines.push(`## Analysis (${analysis.status})`);
+		if (analysis.title) {
+			lines.push("");
+			lines.push(`**${analysis.title}**`);
+		}
 		if (analysis.summary) {
 			lines.push("");
 			lines.push(analysis.summary);
+		}
+		if (analysis.outcome) {
+			lines.push("");
+			lines.push(
+				`**Outcome:** ${analysis.outcome} (${analysis.outcome_confidence ?? "?"} confidence)`,
+			);
+		}
+		if (analysis.session_types?.length) {
+			lines.push("");
+			lines.push(`**Session type:** ${analysis.session_types.join(", ")}`);
 		}
 		if (analysis.topics?.length) {
 			lines.push("");
 			lines.push(`**Topics:** ${analysis.topics.join(", ")}`);
 		}
-		if (analysis.frustrations?.length) {
-			lines.push("");
-			lines.push("**Frustrations:**");
-			for (const f of analysis.frustrations) {
-				lines.push(`- ${f}`);
+		if (analysis.frustrations) {
+			let items: FrustrationItem[];
+			try {
+				items =
+					typeof analysis.frustrations === "string"
+						? JSON.parse(analysis.frustrations)
+						: analysis.frustrations;
+			} catch {
+				items = [];
+			}
+			if (items.length > 0) {
+				lines.push("");
+				lines.push("**Frustrations:**");
+				for (const f of items) {
+					lines.push(`- [${f.severity}/${f.category}] ${f.description}`);
+				}
 			}
 		}
-		if (analysis.workflow_notes) {
+		if (analysis.actionable_insight) {
 			lines.push("");
-			lines.push(`**Notes:** ${analysis.workflow_notes}`);
+			lines.push(`**Insight:** ${analysis.actionable_insight}`);
 		}
 	}
 

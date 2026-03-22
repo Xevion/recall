@@ -1,39 +1,108 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["summary", "topics", "frustrations", "workflow_notes", "is_research_subagent"],
-  "additionalProperties": false,
-  "properties": {
-    "summary": {
-      "type": "string",
-      "description": "2-3 sentence summary of what was accomplished in this session"
-    },
-    "topics": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "3-8 topic tags for this session (e.g. 'authentication', 'database-migration', 'react-components')"
-    },
-    "frustrations": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Detected pain points: repeated failures, backtracking, user corrections, tool misuse. Empty array if none."
-    },
-    "workflow_notes": {
-      "type": "string",
-      "description": "Observations about tool usage patterns, workflow efficiency, configuration issues. Focus on actionable insights."
-    },
-    "is_research_subagent": {
-      "type": "boolean",
-      "description": "True if this session is a subagent doing research/exploration/evaluation work"
-    },
-    "research_topic": {
-      "type": ["string", "null"],
-      "description": "If is_research_subagent is true, the topic being researched. Null otherwise."
-    },
-    "research_tags": {
-      "type": ["array", "null"],
-      "items": { "type": "string" },
-      "description": "If is_research_subagent is true, searchable tags for the research. Null otherwise."
-    }
-  }
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"type": "object",
+	"required": [
+		"title",
+		"summary",
+		"outcome",
+		"outcome_confidence",
+		"session_types",
+		"topics",
+		"frustrations",
+		"actionable_insight",
+		"is_research_subagent"
+	],
+	"additionalProperties": false,
+	"properties": {
+		"title": {
+			"type": "string",
+			"maxLength": 80,
+			"description": "Concise title for this session, like a git commit subject. One phrase, no period. Under 80 characters."
+		},
+		"summary": {
+			"type": "string",
+			"description": "1-2 sentences, under 40 words. First sentence: what was accomplished (not how). Second sentence: the single most important challenge or blocker — omit if straightforward."
+		},
+		"outcome": {
+			"type": "string",
+			"enum": ["completed", "progressed", "abandoned", "pivoted"],
+			"description": "Goal-relative outcome. 'completed' = goal achieved (tests pass, question answered, plan written). 'progressed' = meaningful progress, not done. 'abandoned' = stopped without resolution. 'pivoted' = changed direction mid-session."
+		},
+		"outcome_confidence": {
+			"type": "string",
+			"enum": ["high", "medium", "low"],
+			"description": "How confident are you in the outcome classification? 'low' if intent is unclear or session is very short."
+		},
+		"session_types": {
+			"type": "array",
+			"items": {
+				"type": "string",
+				"enum": [
+					"implementation",
+					"exploration",
+					"debugging",
+					"planning",
+					"review",
+					"maintenance",
+					"research"
+				]
+			},
+			"minItems": 1,
+			"description": "What kind of work this session involved. Use multiple values if the session pivoted (e.g. debugging then implementation)."
+		},
+		"topics": {
+			"type": "array",
+			"items": { "type": "string" },
+			"minItems": 1,
+			"maxItems": 8,
+			"description": "Topic tags in 'category:tag' format. Pick from the provided vocabulary when possible, mint new tags within a category when nothing fits. 1-8 tags."
+		},
+		"frustrations": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["category", "description", "severity"],
+				"additionalProperties": false,
+				"properties": {
+					"category": {
+						"type": "string",
+						"enum": [
+							"tool_failure",
+							"user_correction",
+							"external_blocker",
+							"workflow_antipattern"
+						],
+						"description": "tool_failure: tool errors, retries, crashes. user_correction: user corrected the assistant's approach. external_blocker: rate limits, missing permissions, network issues. workflow_antipattern: inefficient patterns like sequential reads, unnecessary re-reads, not checking --help."
+					},
+					"description": {
+						"type": "string",
+						"description": "Concise description of the frustration. One sentence."
+					},
+					"severity": {
+						"type": "string",
+						"enum": ["minor", "significant", "blocking"],
+						"description": "minor: brief annoyance, recovered quickly. significant: wasted multiple turns or required backtracking. blocking: prevented progress on the main goal."
+					}
+				}
+			},
+			"description": "Categorized frustrations detected in the session. Empty array if none."
+		},
+		"actionable_insight": {
+			"type": ["string", "null"],
+			"description": "One actionable observation for future sessions. Must be something concrete that could improve workflow next time. Null if nothing novel or actionable."
+		},
+		"is_research_subagent": {
+			"type": "boolean",
+			"description": "True if this session is a subagent doing research/exploration/evaluation work."
+		},
+		"research_topic": {
+			"type": ["string", "null"],
+			"description": "If is_research_subagent is true, the topic being researched. Null otherwise."
+		},
+		"research_tags": {
+			"type": ["array", "null"],
+			"items": { "type": "string" },
+			"description": "If is_research_subagent is true, searchable tags for the research. Null otherwise."
+		}
+	}
 }

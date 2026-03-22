@@ -19,10 +19,18 @@ export interface RecallConfig {
 		max_consecutive_failures: number;
 		max_retries: number;
 		triage: {
-			min_messages: number;
-			min_turns: number;
-			min_duration_s: number;
-			require_tool_calls: boolean;
+			parent_thresholds: {
+				min_messages: number;
+				min_turns: number;
+				min_duration_s: number;
+				require_tool_calls: boolean;
+			};
+			subagent_thresholds: {
+				min_messages: number;
+				min_turns: number;
+				min_duration_s: number;
+				require_tool_calls: boolean;
+			};
 			auto_analyze_if_subagents: boolean;
 			auto_analyze_min_turns: number;
 			auto_analyze_if_errors: boolean;
@@ -60,10 +68,18 @@ const DEFAULT_CONFIG: RecallConfig = {
 		max_consecutive_failures: 5,
 		max_retries: 3,
 		triage: {
-			min_messages: 4,
-			min_turns: 2,
-			min_duration_s: 30,
-			require_tool_calls: true,
+			parent_thresholds: {
+				min_messages: 8,
+				min_turns: 3,
+				min_duration_s: 45,
+				require_tool_calls: true,
+			},
+			subagent_thresholds: {
+				min_messages: 6,
+				min_turns: 1,
+				min_duration_s: 30,
+				require_tool_calls: true,
+			},
 			auto_analyze_if_subagents: true,
 			auto_analyze_min_turns: 10,
 			auto_analyze_if_errors: true,

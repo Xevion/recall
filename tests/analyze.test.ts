@@ -2,10 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { tryExtractAnalysisOutput } from "../src/analyze/index";
 
 const VALID_OUTPUT = {
-	summary: "Brief session fixing a parser bug.",
-	topics: ["parser", "bugfix"],
+	title: "Fix parser bug in tokenizer",
+	summary:
+		"Fixed a parser bug causing incorrect token boundaries. Required tracing through the lexer state machine.",
+	outcome: "completed" as const,
+	outcome_confidence: "high" as const,
+	session_types: ["debugging" as const],
+	topics: ["language:typescript", "activity:debugging"],
 	frustrations: [],
-	workflow_notes: "Clean workflow, no issues.",
+	actionable_insight: null,
 	is_research_subagent: false,
 	research_topic: null,
 	research_tags: null,

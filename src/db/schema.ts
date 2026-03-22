@@ -88,16 +88,20 @@ export async function initSchema(conn: DuckDBConnection): Promise<void> {
 
 	await conn.run(`
 		CREATE TABLE IF NOT EXISTS analysis (
-			session_id     TEXT PRIMARY KEY REFERENCES session(id),
-			status         analysis_status NOT NULL DEFAULT 'pending',
-			summary        TEXT,
-			topics         TEXT[],
-			frustrations   TEXT[],
-			workflow_notes TEXT,
-			error_reason   TEXT,
-			retry_count    INT DEFAULT 0,
-			analyzed_at    TIMESTAMPTZ,
-			analyzer_model TEXT
+			session_id         TEXT PRIMARY KEY REFERENCES session(id),
+			status             analysis_status NOT NULL DEFAULT 'pending',
+			title              TEXT,
+			summary            TEXT,
+			outcome            TEXT,
+			outcome_confidence TEXT,
+			session_types      TEXT[],
+			topics             TEXT[],
+			frustrations       JSON,
+			actionable_insight TEXT,
+			error_reason       TEXT,
+			retry_count        INT DEFAULT 0,
+			analyzed_at        TIMESTAMPTZ,
+			analyzer_model     TEXT
 		)
 	`);
 

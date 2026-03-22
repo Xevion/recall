@@ -15,7 +15,7 @@ const FTS_INDEXES: FtsIndexConfig[] = [
 	{
 		table: "analysis",
 		idColumn: "session_id",
-		columns: ["summary", "workflow_notes"],
+		columns: ["title", "summary", "actionable_insight"],
 	},
 	{
 		table: "research_artifact",

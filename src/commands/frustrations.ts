@@ -27,7 +27,7 @@ export const frustrationsCommand = new Command("frustrations")
 				opts.includeRefused
 					? "a.status IN ('complete', 'refused')"
 					: "a.status = 'complete'",
-				"array_length(a.frustrations) > 0",
+				"a.frustrations IS NOT NULL AND json_array_length(a.frustrations) > 0",
 			];
 			const params: unknown[] = [];
 
@@ -59,7 +59,7 @@ export const frustrationsCommand = new Command("frustrations")
 				} else {
 					const pattern = `%${escapeLike(opts.query)}%`;
 					conditions.push(
-						"(a.summary ILIKE ? ESCAPE '\\' OR a.workflow_notes ILIKE ? ESCAPE '\\')",
+						"(a.summary ILIKE ? ESCAPE '\\' OR a.actionable_insight ILIKE ? ESCAPE '\\')",
 					);
 					params.push(pattern, pattern);
 					sql = `
@@ -80,17 +80,27 @@ export const frustrationsCommand = new Command("frustrations")
 					LIMIT 50`;
 			}
 
+			interface FrustrationItem {
+				category: string;
+				description: string;
+				severity: string;
+			}
+
 			const results = await all<{
 				id: string;
 				project_path: string | null;
 				project_name: string | null;
 				started_at: string;
-				frustrations: string[];
+				frustrations: string;
 				summary: string;
 			}>(db, sql, ...params);
 
 			if (opts.json) {
-				console.log(JSON.stringify(results, null, 2));
+				const parsed = results.map((r) => ({
+					...r,
+					frustrations: parseFrustrations(r.frustrations),
+				}));
+				console.log(JSON.stringify(parsed, null, 2));
 			} else {
 				if (results.length === 0) {
 					console.log("No frustrations detected.");
@@ -126,8 +136,10 @@ export const frustrationsCommand = new Command("frustrations")
 							console.log(`${indent}${c.subtext0(line)}`);
 						}
 					}
-					for (const f of r.frustrations ?? []) {
-						const lines = wordWrap(f, bulletContentWidth);
+					const items = parseFrustrations(r.frustrations);
+					for (const f of items) {
+						const label = `[${f.severity}/${f.category}] ${f.description}`;
+						const lines = wordWrap(label, bulletContentWidth);
 						for (let i = 0; i < lines.length; i++) {
 							const line = lines[i]!;
 							if (i === 0) {
@@ -142,6 +154,15 @@ export const frustrationsCommand = new Command("frustrations")
 					console.log();
 				}
 				printFooter(results.length, "session");
+			}
+
+			function parseFrustrations(raw: string | unknown): FrustrationItem[] {
+				try {
+					const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+					return Array.isArray(parsed) ? parsed : [];
+				} catch {
+					return [];
+				}
 			}
 		});
 	});

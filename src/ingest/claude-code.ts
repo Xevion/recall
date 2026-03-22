@@ -133,6 +133,10 @@ async function parseClaudeCodeSession(
 	// API message into separate JSONL events sharing the same msg.id.
 	const messageById = new Map<string, number>();
 
+	// Track tool_use emission timestamps for duration approximation.
+	// Maps tool_call.id → assistant event timestamp.
+	const toolUseTimestamps = new Map<string, Date>();
+
 	for (const event of events) {
 		const type = event.type as string;
 		if (type !== "user" && type !== "assistant") continue;
@@ -161,6 +165,10 @@ async function parseClaudeCodeSession(
 
 		// Check if this event should merge into an existing message
 		const existingIdx = msgId != null ? messageById.get(msgId) : undefined;
+		const eventTs = event.timestamp
+			? new Date(event.timestamp as string)
+			: null;
+
 		if (existingIdx != null && existingIdx < messages.length) {
 			const existing = messages[existingIdx];
 			if (!existing) continue;
@@ -172,6 +180,8 @@ async function parseClaudeCodeSession(
 					sessionId,
 					seq,
 					toolCalls,
+					toolUseTimestamps,
+					eventTs,
 				);
 				if (extraContent.text) {
 					existing.content = existing.content
@@ -195,6 +205,8 @@ async function parseClaudeCodeSession(
 				sessionId,
 				seq,
 				toolCalls,
+				toolUseTimestamps,
+				eventTs,
 			);
 			textContent = processed.text;
 			hasToolUse = processed.hasToolUse;
@@ -301,6 +313,8 @@ function processContentBlocks(
 	sessionId: string,
 	seq: number,
 	toolCalls: NormalizedToolCall[],
+	toolUseTimestamps: Map<string, Date>,
+	eventTimestamp: Date | null,
 ): { text: string; hasToolUse: boolean } {
 	let textContent = "";
 	let hasToolUse = false;
@@ -310,8 +324,9 @@ function processContentBlocks(
 			textContent += `${block.text as string}\n`;
 		} else if (block.type === "tool_use") {
 			hasToolUse = true;
+			const tcId = (block.id as string) ?? `tc-${seq}-${toolCalls.length}`;
 			toolCalls.push({
-				id: (block.id as string) ?? `tc-${seq}-${toolCalls.length}`,
+				id: tcId,
 				messageId,
 				sessionId,
 				toolName: block.name as string,
@@ -319,9 +334,20 @@ function processContentBlocks(
 				isError: false,
 				durationMs: null,
 			});
+			if (eventTimestamp) {
+				toolUseTimestamps.set(tcId, eventTimestamp);
+			}
 		} else if (block.type === "tool_result") {
 			const tc = toolCalls.find((t) => t.id === block.tool_use_id);
-			if (block.is_error && tc) tc.isError = true;
+			if (tc) {
+				if (block.is_error) tc.isError = true;
+				// Approximate duration from event timestamps
+				const useTs = toolUseTimestamps.get(tc.id);
+				if (useTs && eventTimestamp) {
+					const deltaMs = eventTimestamp.getTime() - useTs.getTime();
+					if (deltaMs >= 0) tc.durationMs = deltaMs;
+				}
+			}
 			textContent += `${summarizeToolResult(block, tc)}\n`;
 		} else if (block.type === "thinking") {
 			textContent += "(thinking)\n";

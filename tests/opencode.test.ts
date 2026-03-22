@@ -12,8 +12,11 @@ let instance: DuckDBInstance;
 let conn: DuckDBConnection;
 let tmpDbPath: string;
 
-const PARENT_ID = "oc-parent-001";
-const CHILD_ID = "oc-child-001";
+// Raw SQLite IDs — the parser prefixes these with "oc-" for DuckDB
+const RAW_PARENT_ID = "parent-001";
+const RAW_CHILD_ID = "child-001";
+const PARENT_ID = `oc-${RAW_PARENT_ID}`;
+const CHILD_ID = `oc-${RAW_CHILD_ID}`;
 const NOW_MS = 1735689600000; // 2025-01-01T00:00:00.000Z
 const LATER_MS = NOW_MS + 120_000; // +2 minutes
 
@@ -55,7 +58,7 @@ beforeAll(async () => {
 
 	// Parent session
 	sqlite.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)", [
-		PARENT_ID,
+		RAW_PARENT_ID,
 		"my-project",
 		null,
 		"/home/user/project",
@@ -65,9 +68,9 @@ beforeAll(async () => {
 	]);
 	// Child/subagent session
 	sqlite.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?, ?)", [
-		CHILD_ID,
+		RAW_CHILD_ID,
 		"my-project",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		"/home/user/project",
 		"Sub session",
 		NOW_MS + 10_000,
@@ -77,14 +80,14 @@ beforeAll(async () => {
 	// Messages for parent: user + assistant
 	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
 		"msg-u1",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		NOW_MS,
 		NOW_MS,
 		JSON.stringify({ role: "user" }),
 	]);
 	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
 		"msg-a1",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		NOW_MS + 5000,
 		NOW_MS + 5000,
 		JSON.stringify({
@@ -97,14 +100,14 @@ beforeAll(async () => {
 	// Messages for child: user + assistant
 	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
 		"msg-cu1",
-		CHILD_ID,
+		RAW_CHILD_ID,
 		NOW_MS + 10_000,
 		NOW_MS + 10_000,
 		JSON.stringify({ role: "user" }),
 	]);
 	sqlite.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
 		"msg-ca1",
-		CHILD_ID,
+		RAW_CHILD_ID,
 		NOW_MS + 15_000,
 		NOW_MS + 15_000,
 		JSON.stringify({
@@ -118,7 +121,7 @@ beforeAll(async () => {
 	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
 		"part-u1",
 		"msg-u1",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		NOW_MS,
 		NOW_MS,
 		JSON.stringify({ type: "text", text: "Hello from user" }),
@@ -128,7 +131,7 @@ beforeAll(async () => {
 	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
 		"part-a1-text",
 		"msg-a1",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		NOW_MS + 5000,
 		NOW_MS + 5000,
 		JSON.stringify({ type: "text", text: "Assist response" }),
@@ -136,7 +139,7 @@ beforeAll(async () => {
 	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
 		"part-a1-tool",
 		"msg-a1",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		NOW_MS + 5000,
 		NOW_MS + 5000,
 		JSON.stringify({
@@ -151,7 +154,7 @@ beforeAll(async () => {
 	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
 		"part-a1-tool-err",
 		"msg-a1",
-		PARENT_ID,
+		RAW_PARENT_ID,
 		NOW_MS + 5000,
 		NOW_MS + 5000,
 		JSON.stringify({
@@ -166,7 +169,7 @@ beforeAll(async () => {
 	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
 		"part-cu1",
 		"msg-cu1",
-		CHILD_ID,
+		RAW_CHILD_ID,
 		NOW_MS + 10_000,
 		NOW_MS + 10_000,
 		JSON.stringify({ type: "text", text: "Sub user msg" }),
@@ -174,7 +177,7 @@ beforeAll(async () => {
 	sqlite.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
 		"part-ca1",
 		"msg-ca1",
-		CHILD_ID,
+		RAW_CHILD_ID,
 		NOW_MS + 15_000,
 		NOW_MS + 15_000,
 		JSON.stringify({ type: "text", text: "Sub assistant msg" }),

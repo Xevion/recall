@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { analyzeCommand } from "./commands/analyze";
+import { exportCommand } from "./commands/export";
 import { frustrationsCommand } from "./commands/frustrations";
 import { ftsCommand } from "./commands/fts";
 import { ingestCommand } from "./commands/ingest";
@@ -12,7 +13,7 @@ import { showCommand } from "./commands/show";
 import { statsCommand } from "./commands/stats";
 import { toolsCommand } from "./commands/tools";
 import { close } from "./db/index";
-import { setVerbosity } from "./utils/logger";
+import { setQuiet, setVerbosity } from "./utils/logger";
 import { ValidationError } from "./utils/validation";
 
 const program = new Command()
@@ -25,13 +26,16 @@ const program = new Command()
 		(_v, prev: number) => prev + 1,
 		0,
 	)
+	.option("-q, --quiet", "Suppress non-essential output")
 	.hook("preAction", (_thisCommand) => {
 		const opts = program.opts();
 		setVerbosity(opts.verbose as number);
+		if (opts.quiet) setQuiet(true);
 	});
 
 program.addCommand(ingestCommand);
 program.addCommand(analyzeCommand);
+program.addCommand(exportCommand);
 program.addCommand(ftsCommand);
 program.addCommand(sessionsCommand);
 program.addCommand(showCommand);

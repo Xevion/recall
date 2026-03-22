@@ -203,7 +203,7 @@ function parseOpenCodeSession(
 		});
 	}
 
-	const parentId = ocSession.parent_id ?? null;
+	const parentId = ocSession.parent_id ? `oc-${ocSession.parent_id}` : null;
 
 	let subagent: NormalizedSubagent | null = null;
 	if (parentId) {

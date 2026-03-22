@@ -28,6 +28,14 @@ mise exec -- duckdb ~/.local/share/recall/recall.db "SELECT ..."
 
 Do NOT write temp bun/ts scripts to query the database. The duckdb binary is faster and avoids Node API compatibility issues.
 
+## Long-Running Processes
+
+`recall ingest` and `recall analyze` can be long-running and hold a DuckDB connection. **NEVER kill these processes.** DuckDB is single-writer — killing mid-write risks corruption. If a process is holding the database lock:
+
+1. Check if ingest/analyze is running (`ps aux | grep recall`)
+2. If yes, wait for it to finish or ask the user to confirm it's safe to proceed
+3. Do NOT use `kill`, `pkill`, or similar to force-terminate recall processes
+
 ## Commands
 
 ```

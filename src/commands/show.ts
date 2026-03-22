@@ -8,7 +8,13 @@ import {
 	colorStatus,
 	projectDisplay,
 } from "../utils/colors";
-import { formatDate, formatDuration, formatTokens } from "../utils/format";
+import {
+	formatDate,
+	formatDuration,
+	formatTokens,
+	termWidth,
+	wordWrap,
+} from "../utils/format";
 import { c } from "../utils/theme";
 
 interface SessionDetail {
@@ -51,8 +57,63 @@ interface ToolStatRow {
 	errors: number;
 }
 
+const LABEL_WIDTH = 12;
+const INDENT = 2;
+const PREFIX_WIDTH = INDENT + LABEL_WIDTH;
+
 function kv(label: string, value: string): void {
-	console.log(`  ${c.overlay1(label.padEnd(12))}${value}`);
+	console.log(
+		`${" ".repeat(INDENT)}${c.overlay1(label.padEnd(LABEL_WIDTH))}${value}`,
+	);
+}
+
+function kvWrap(
+	label: string,
+	text: string,
+	colorFn: (s: string) => string = (s) => s,
+): void {
+	const availWidth = Math.max(20, termWidth() - PREFIX_WIDTH);
+	const indent = " ".repeat(PREFIX_WIDTH);
+	const lines = wordWrap(text, availWidth);
+
+	if (lines.length === 0) return;
+
+	const prefix = `${" ".repeat(INDENT)}${c.overlay1(label.padEnd(LABEL_WIDTH))}`;
+	const output = lines
+		.map((l, i) =>
+			i === 0 ? `${prefix}${colorFn(l)}` : `${indent}${colorFn(l)}`,
+		)
+		.join("\n");
+	console.log(output);
+}
+
+function kvList(
+	label: string,
+	items: string[],
+	colorFn: (s: string) => string = (s) => s,
+	bullet = "•",
+): void {
+	const bulletPrefix = `${bullet} `;
+	const bulletWidth = bulletPrefix.length;
+	const availWidth = Math.max(20, termWidth() - PREFIX_WIDTH - bulletWidth);
+	const indent = " ".repeat(PREFIX_WIDTH);
+	const bulletIndent = " ".repeat(PREFIX_WIDTH + bulletWidth);
+
+	for (let i = 0; i < items.length; i++) {
+		const item = items[i]!;
+		const lines = wordWrap(item, availWidth);
+		for (let j = 0; j < lines.length; j++) {
+			const line = lines[j]!;
+			if (i === 0 && j === 0) {
+				const prefix = `${" ".repeat(INDENT)}${c.overlay1(label.padEnd(LABEL_WIDTH))}`;
+				console.log(`${prefix}${c.overlay0(bulletPrefix)}${colorFn(line)}`);
+			} else if (j === 0) {
+				console.log(`${indent}${c.overlay0(bulletPrefix)}${colorFn(line)}`);
+			} else {
+				console.log(`${bulletIndent}${colorFn(line)}`);
+			}
+		}
+	}
 }
 
 export const showCommand = new Command("show")
@@ -123,11 +184,12 @@ export const showCommand = new Command("show")
 				const a = analysis[0];
 				if (a) {
 					console.log(`\n${c.text.bold("Analysis")} ${colorStatus(a.status)}`);
-					if (a.summary) kv("Summary", c.subtext0(a.summary));
-					if (a.topics?.length) kv("Topics", c.subtext0(a.topics.join(", ")));
+					if (a.summary) kvWrap("Summary", a.summary, c.subtext0);
+					if (a.topics?.length)
+						kvWrap("Topics", a.topics.join(", "), c.subtext0);
 					if (a.frustrations?.length)
-						kv("Issues", c.catYellow(a.frustrations.join("; ")));
-					if (a.workflow_notes) kv("Notes", c.subtext0(a.workflow_notes));
+						kvList("Issues", a.frustrations, c.catYellow);
+					if (a.workflow_notes) kvWrap("Notes", a.workflow_notes, c.subtext0);
 				}
 
 				if (subagents.length > 0) {

@@ -3,10 +3,14 @@ import { ftsIndexesExist } from "../db/fts";
 import { all, withDb } from "../db/index";
 import { escapeLike, getAvailableProjects } from "../db/queries";
 import { colorProject, colorStarted, projectDisplay } from "../utils/colors";
-import { formatDate } from "../utils/format";
+import { formatDate, termWidth, wordWrap } from "../utils/format";
 import { printFooter } from "../utils/table";
 import { c } from "../utils/theme";
 import { parseRelativeDate, suggestProject } from "../utils/validation";
+
+const CONTENT_INDENT = 2;
+const BULLET_PREFIX = "! ";
+const BULLET_WIDTH = BULLET_PREFIX.length;
 
 export const frustrationsCommand = new Command("frustrations")
 	.description("Show detected frustrations and pain points")
@@ -101,17 +105,39 @@ export const frustrationsCommand = new Command("frustrations")
 					}
 					return;
 				}
+				const cols = termWidth();
+				const contentWidth = Math.max(20, cols - CONTENT_INDENT);
+				const bulletContentWidth = Math.max(
+					20,
+					cols - CONTENT_INDENT - BULLET_WIDTH,
+				);
+				const indent = " ".repeat(CONTENT_INDENT);
+				const bulletIndent = " ".repeat(CONTENT_INDENT + BULLET_WIDTH);
+
 				for (const r of results) {
 					const proj = projectDisplay(r);
 					const date = formatDate(r.started_at);
 					console.log(
-						`${colorProject(proj)} ${c.overlay0("—")} ${colorStarted(r.started_at, date)}`,
+						`${colorProject(proj)} ${c.overlay0("—")} ${colorStarted(r.started_at, date)} ${c.overlay0(r.id.slice(0, 14))}`,
 					);
 					if (r.summary) {
-						console.log(`  ${c.subtext0(r.summary.slice(0, 100))}`);
+						const lines = wordWrap(r.summary, contentWidth);
+						for (const line of lines) {
+							console.log(`${indent}${c.subtext0(line)}`);
+						}
 					}
 					for (const f of r.frustrations ?? []) {
-						console.log(`  ${c.catYellow("!")} ${c.text(f)}`);
+						const lines = wordWrap(f, bulletContentWidth);
+						for (let i = 0; i < lines.length; i++) {
+							const line = lines[i]!;
+							if (i === 0) {
+								console.log(
+									`${indent}${c.catYellow(BULLET_PREFIX)}${c.text(line)}`,
+								);
+							} else {
+								console.log(`${bulletIndent}${c.text(line)}`);
+							}
+						}
 					}
 					console.log();
 				}

@@ -1,4 +1,3 @@
-import Table from "cli-table3";
 import { Command } from "commander";
 import { withDb } from "../db/index";
 import type { SessionRow, SessionSearchRow } from "../db/queries";
@@ -7,9 +6,18 @@ import {
 	listSessions,
 	searchSessions,
 } from "../db/queries";
+import {
+	colorNumeric,
+	colorProject,
+	colorSource,
+	colorStarted,
+	colorStatus,
+	projectDisplay,
+} from "../utils/colors";
 import { formatDate, formatDuration } from "../utils/format";
-import { extractProjectName } from "../utils/path";
-import { BORDERLESS_CHARS, c } from "../utils/theme";
+import { createTable, normalizeScores, printFooter } from "../utils/table";
+import { c } from "../utils/theme";
+
 import {
 	parseIntOption,
 	parseRelativeDate,
@@ -29,32 +37,6 @@ const VALID_STATUSES = [
 	"retry_pending",
 ];
 
-// Bag of distinct project colors — stable per project name via hash
-const PROJECT_COLORS = [
-	c.rosewater,
-	c.flamingo,
-	c.pink,
-	c.mauve,
-	c.peach,
-	c.catYellow,
-	c.catGreen,
-	c.teal,
-	c.sky,
-	c.sapphire,
-	c.catBlue,
-	c.lavender,
-	c.maroon,
-];
-
-function hashStr(s: string): number {
-	let h = 0;
-	for (let i = 0; i < s.length; i++) {
-		h = Math.imul(31, h) + s.charCodeAt(i);
-		h |= 0;
-	}
-	return Math.abs(h);
-}
-
 function parseSortBy(raw: string): { field: string; dir?: "asc" | "desc" } {
 	const parts = raw.split("/");
 	const field = resolveEnumOption(parts[0] ?? "", VALID_SORT_FIELDS, "sort-by");
@@ -63,91 +45,6 @@ function parseSortBy(raw: string): { field: string; dir?: "asc" | "desc" } {
 		resolveEnumOption(dir, ["asc", "desc"] as const, "sort-by direction");
 	}
 	return { field, dir: dir as "asc" | "desc" | undefined };
-}
-
-function colorProject(name: string): string {
-	if (name === "—") return c.overlay0(name);
-	const idx = hashStr(name) % PROJECT_COLORS.length;
-	const colorFn = PROJECT_COLORS[idx] ?? c.text;
-	return colorFn(name);
-}
-
-function colorStarted(iso: string, formatted: string): string {
-	const deltaSec = (Date.now() - new Date(iso).getTime()) / 1000;
-	if (deltaSec < 0) return c.catRed(formatted);
-	if (deltaSec < 300) return c.catGreen(formatted);
-	if (deltaSec < 3600) return c.teal(formatted);
-	if (deltaSec < 28800) return c.sky(formatted);
-	if (deltaSec < 259200) return c.catBlue(formatted);
-	if (deltaSec < 604800) return c.lavender(formatted);
-	return c.overlay1(formatted);
-}
-
-function colorStatus(status: string | null): string {
-	if (!status) return c.overlay0("—");
-	switch (status) {
-		case "complete":
-			return c.catGreen(status);
-		case "pending":
-		case "retry_pending":
-			return c.catYellow(status);
-		case "processing":
-			return c.sapphire(status);
-		case "skipped":
-			return c.overlay1(status);
-		case "error":
-			return c.catRed(status);
-		case "refused":
-			return c.maroon(status);
-		default:
-			return status;
-	}
-}
-
-function colorSource(source: string): string {
-	switch (source) {
-		case "claude-code":
-			return c.overlay2(source);
-		case "opencode":
-			return c.sapphire(source);
-		default:
-			return source;
-	}
-}
-
-function colorNumeric(
-	val: number | null,
-	p50: number,
-	p75: number,
-	p90: number,
-	formatted: string,
-): string {
-	if (val == null || val === 0) return c.overlay0(formatted);
-	if (val < p50) return c.subtext0(formatted);
-	if (val < p75) return c.teal(formatted);
-	if (val < p90) return c.peach(formatted);
-	return c.catRed(formatted);
-}
-
-function projectDisplay(row: SessionRow): string {
-	return extractProjectName(row.project_path) ?? row.project_name ?? "—";
-}
-
-function normalizeRelevance(sessions: SessionSearchRow[]): Map<string, number> {
-	const scores = sessions.map((s) => s.relevance).filter((s) => s != null);
-	const result = new Map<string, number>();
-	if (scores.length === 0) return result;
-	const min = Math.min(...scores);
-	const max = Math.max(...scores);
-	const range = max - min;
-	for (const s of sessions) {
-		if (s.relevance != null) {
-			const pct =
-				range === 0 ? 100 : Math.round(((max - s.relevance) / range) * 100);
-			result.set(s.id, pct);
-		}
-	}
-	return result;
 }
 
 function buildRow(
@@ -205,7 +102,7 @@ function renderTable(
 		"Duration",
 		"Status",
 	];
-	const colAligns: Table.HorizontalAlignment[] = [
+	const colAligns: ("left" | "right" | "center")[] = [
 		"left",
 		"left",
 		"left",
@@ -231,13 +128,7 @@ function renderTable(
 		colWidths.push(50);
 	}
 
-	const table = new Table({
-		head: head.map((h) => c.text.bold(h)),
-		colAligns,
-		colWidths,
-		style: { head: [], border: [], "padding-left": 0, "padding-right": 0 },
-		chars: BORDERLESS_CHARS,
-	});
+	const table = createTable({ head, colAligns, colWidths });
 
 	if (sessions.length === 0) {
 		console.log(table.toString());
@@ -251,7 +142,7 @@ function renderTable(
 	}
 
 	console.log(table.toString());
-	console.log(c.overlay1(`\n${sessions.length} session(s)`));
+	printFooter(sessions.length, "session");
 }
 
 export const sessionsCommand = new Command("sessions")
@@ -324,7 +215,9 @@ export const sessionsCommand = new Command("sessions")
 		await withDb(async (db) => {
 			if (opts.query) {
 				const results = await searchSessions(db, opts.query, listOpts);
-				const relevanceMap = normalizeRelevance(results);
+				const relevanceMap = normalizeScores(
+					results.map((r) => ({ id: r.id, score: r.relevance })),
+				);
 
 				if (opts.json) {
 					console.log(JSON.stringify(results, null, 2));

@@ -1,8 +1,8 @@
-import Table from "cli-table3";
 import { Command } from "commander";
 import { withDb } from "../db/index";
 import { getAvailableProjects, getToolStats } from "../db/queries";
-import { BORDERLESS_CHARS, c } from "../utils/theme";
+import { createTable, printFooter } from "../utils/table";
+import { c } from "../utils/theme";
 import {
 	parseRelativeDate,
 	resolveEnumOption,
@@ -31,19 +31,10 @@ export const toolsCommand = new Command("tools")
 			if (opts.json) {
 				console.log(JSON.stringify(stats, null, 2));
 			} else {
-				const table = new Table({
-					head: ["Tool", "Calls", "Errors", "Error%", "Avg ms"].map((h) =>
-						c.text.bold(h),
-					),
+				const table = createTable({
+					head: ["Tool", "Calls", "Errors", "Error%", "Avg ms"],
 					colAligns: ["left", "right", "right", "right", "right"],
 					colWidths: [24, 10, 10, 10, 10],
-					style: {
-						head: [],
-						border: [],
-						"padding-left": 0,
-						"padding-right": 0,
-					},
-					chars: BORDERLESS_CHARS,
 				});
 
 				for (const s of stats) {
@@ -61,6 +52,8 @@ export const toolsCommand = new Command("tools")
 				}
 
 				console.log(table.toString());
+				printFooter(stats.length, "tool");
+
 				if (stats.length === 0 && opts.project) {
 					const available = await getAvailableProjects(db);
 					const suggestions = suggestProject(opts.project, available);

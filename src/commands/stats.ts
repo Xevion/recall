@@ -1,8 +1,9 @@
-import Table from "cli-table3";
 import { Command } from "commander";
 import { all, withDb } from "../db/index";
+import { colorStarted } from "../utils/colors";
 import { formatDuration, formatTokens } from "../utils/format";
-import { BORDERLESS_CHARS, c } from "../utils/theme";
+import { createTable, printFooter } from "../utils/table";
+import { c } from "../utils/theme";
 import { parseRelativeDate, resolveEnumOption } from "../utils/validation";
 
 const VALID_PERIODS = ["day", "week", "month"] as const;
@@ -63,7 +64,7 @@ export const statsCommand = new Command("stats")
 			if (opts.json) {
 				console.log(JSON.stringify(results, null, 2));
 			} else {
-				const table = new Table({
+				const table = createTable({
 					head: [
 						"Period",
 						"Sessions",
@@ -72,7 +73,7 @@ export const statsCommand = new Command("stats")
 						"Tokens In",
 						"Tokens Out",
 						"Duration",
-					].map((h) => c.text.bold(h)),
+					],
 					colAligns: [
 						"left",
 						"right",
@@ -83,18 +84,12 @@ export const statsCommand = new Command("stats")
 						"right",
 					],
 					colWidths: [14, 10, 10, 8, 12, 12, 10],
-					style: {
-						head: [],
-						border: [],
-						"padding-left": 0,
-						"padding-right": 0,
-					},
-					chars: BORDERLESS_CHARS,
 				});
 
 				for (const r of results) {
+					const dateStr = new Date(r.period).toLocaleDateString();
 					table.push([
-						c.text(new Date(r.period).toLocaleDateString()),
+						colorStarted(r.period, dateStr),
 						c.subtext0(String(r.sessions)),
 						c.subtext0(String(r.messages)),
 						c.subtext0(String(r.turns)),
@@ -105,7 +100,7 @@ export const statsCommand = new Command("stats")
 				}
 
 				console.log(table.toString());
-				console.log(c.overlay1(`\n${results.length} period(s)`));
+				printFooter(results.length, "period");
 			}
 		});
 	});

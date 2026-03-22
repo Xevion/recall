@@ -2,7 +2,9 @@ import { Command } from "commander";
 import { ftsIndexesExist } from "../db/fts";
 import { all, withDb } from "../db/index";
 import { escapeLike, getAvailableProjects } from "../db/queries";
-import { extractProjectName } from "../utils/path";
+import { colorProject, colorStarted, projectDisplay } from "../utils/colors";
+import { formatDate } from "../utils/format";
+import { printFooter } from "../utils/table";
 import { c } from "../utils/theme";
 import { parseRelativeDate, suggestProject } from "../utils/validation";
 
@@ -42,7 +44,6 @@ export const frustrationsCommand = new Command("frustrations")
 			if (opts.query) {
 				const hasFts = await ftsIndexesExist(db);
 				if (hasFts) {
-					// FTS on analysis summary/workflow_notes, filtered to sessions with frustrations
 					sql = `
 						SELECT s.id, s.project_path, s.project_name, s.started_at, a.frustrations, a.summary
 						FROM (SELECT *, fts_main_analysis.match_bm25(session_id, ?) AS score FROM analysis) a
@@ -101,17 +102,20 @@ export const frustrationsCommand = new Command("frustrations")
 					return;
 				}
 				for (const r of results) {
-					const projectDisplay =
-						extractProjectName(r.project_path) ?? r.project_name ?? "unknown";
+					const proj = projectDisplay(r);
+					const date = formatDate(r.started_at);
 					console.log(
-						`${projectDisplay} — ${new Date(r.started_at).toLocaleDateString()}`,
+						`${colorProject(proj)} ${c.overlay0("—")} ${colorStarted(r.started_at, date)}`,
 					);
-					console.log(`  ${r.summary?.slice(0, 100) ?? ""}`);
+					if (r.summary) {
+						console.log(`  ${c.subtext0(r.summary.slice(0, 100))}`);
+					}
 					for (const f of r.frustrations ?? []) {
-						console.log(`  ! ${f}`);
+						console.log(`  ${c.catYellow("!")} ${c.text(f)}`);
 					}
 					console.log();
 				}
+				printFooter(results.length, "session");
 			}
 		});
 	});

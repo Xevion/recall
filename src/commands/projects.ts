@@ -1,9 +1,10 @@
-import Table from "cli-table3";
 import { Command } from "commander";
 import { all, withDb } from "../db/index";
+import { colorProject, colorStarted } from "../utils/colors";
 import { formatDate, formatDuration, formatTokens } from "../utils/format";
 import { extractProjectName } from "../utils/path";
-import { BORDERLESS_CHARS, c } from "../utils/theme";
+import { createTable, printFooter } from "../utils/table";
+import { c } from "../utils/theme";
 import { resolveEnumOption } from "../utils/validation";
 
 const VALID_SORTS = ["recent", "sessions", "tokens"] as const;
@@ -44,7 +45,6 @@ export const projectsCommand = new Command("projects")
          ORDER BY ${orderBy}`,
 			);
 
-			// Derive display names and merge rows that map to the same name
 			const merged = new Map<
 				string,
 				{
@@ -73,7 +73,6 @@ export const projectsCommand = new Command("projects")
 				}
 			}
 
-			// Re-sort merged results
 			const sortFn = {
 				recent: (
 					a: [string, { lastActive: string }],
@@ -105,37 +104,24 @@ export const projectsCommand = new Command("projects")
 				}));
 				console.log(JSON.stringify(jsonResults, null, 2));
 			} else {
-				const table = new Table({
-					head: [
-						"Project",
-						"Sessions",
-						"Tokens",
-						"Duration",
-						"Last Active",
-					].map((h) => c.text.bold(h)),
+				const table = createTable({
+					head: ["Project", "Sessions", "Tokens", "Duration", "Last Active"],
 					colAligns: ["left", "right", "right", "right", "left"],
-					colWidths: [30, 10, 10, 10, 14],
-					style: {
-						head: [],
-						border: [],
-						"padding-left": 0,
-						"padding-right": 0,
-					},
-					chars: BORDERLESS_CHARS,
+					colWidths: [30, 10, 10, 10, 18],
 				});
 
 				for (const [name, data] of entries) {
 					table.push([
-						c.catBlue(name),
+						colorProject(name),
 						c.text(String(data.sessions)),
 						c.subtext0(formatTokens(data.tokens)),
 						c.overlay1(formatDuration(data.duration)),
-						formatDate(data.lastActive),
+						colorStarted(data.lastActive, formatDate(data.lastActive)),
 					]);
 				}
 
 				console.log(table.toString());
-				console.log(c.overlay1(`\n${entries.length} project(s)`));
+				printFooter(entries.length, "project");
 			}
 		});
 	});

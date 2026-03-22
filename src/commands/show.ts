@@ -1,7 +1,15 @@
 import { Command } from "commander";
 import { all, withDb } from "../db/index";
 import { resolveSessionId } from "../db/queries";
-import { extractProjectName } from "../utils/path";
+import {
+	colorProject,
+	colorSource,
+	colorStarted,
+	colorStatus,
+	projectDisplay,
+} from "../utils/colors";
+import { formatDate, formatDuration, formatTokens } from "../utils/format";
+import { c } from "../utils/theme";
 
 interface SessionDetail {
 	id: string;
@@ -41,6 +49,10 @@ interface ToolStatRow {
 	tool_name: string;
 	count: number;
 	errors: number;
+}
+
+function kv(label: string, value: string): void {
+	console.log(`  ${c.overlay1(label.padEnd(12))}${value}`);
 }
 
 export const showCommand = new Command("show")
@@ -86,46 +98,57 @@ export const showCommand = new Command("show")
 					),
 				);
 			} else {
-				const projectDisplay =
-					extractProjectName(session.project_path) ??
-					session.project_name ??
-					"unknown";
-				console.log(`Session: ${session.id}`);
-				console.log(`Source: ${session.source}`);
-				console.log(`Project: ${projectDisplay}`);
-				console.log(`Branch: ${session.git_branch ?? "unknown"}`);
-				console.log(`Started: ${session.started_at}`);
-				console.log(`Duration: ${session.duration_s}s`);
-				console.log(
-					`Messages: ${session.message_count}, Turns: ${session.turn_count}`,
+				const proj = projectDisplay(session);
+				console.log(`${c.text.bold("Session")} ${c.overlay0(session.id)}`);
+				kv("Source", colorSource(session.source));
+				kv("Project", colorProject(proj));
+				kv("Branch", c.subtext0(session.git_branch ?? "—"));
+				kv(
+					"Started",
+					colorStarted(
+						session.started_at,
+						formatDate(session.started_at, true),
+					),
 				);
-				console.log(
-					`Tokens: ${session.token_input} in / ${session.token_output} out`,
+				kv("Duration", c.subtext0(formatDuration(session.duration_s)));
+				kv(
+					"Messages",
+					`${c.subtext0(String(session.message_count))} messages, ${c.subtext0(String(session.turn_count))} turns`,
+				);
+				kv(
+					"Tokens",
+					`${c.overlay1(formatTokens(session.token_input))} in / ${c.overlay1(formatTokens(session.token_output))} out`,
 				);
 
 				const a = analysis[0];
 				if (a) {
-					console.log(`\nAnalysis (${a.status}):`);
-					if (a.summary) console.log(`  Summary: ${a.summary}`);
-					if (a.topics) console.log(`  Topics: ${a.topics}`);
-					if (a.frustrations) console.log(`  Frustrations: ${a.frustrations}`);
-					if (a.workflow_notes) console.log(`  Notes: ${a.workflow_notes}`);
+					console.log(`\n${c.text.bold("Analysis")} ${colorStatus(a.status)}`);
+					if (a.summary) kv("Summary", c.subtext0(a.summary));
+					if (a.topics?.length) kv("Topics", c.subtext0(a.topics.join(", ")));
+					if (a.frustrations?.length)
+						kv("Issues", c.catYellow(a.frustrations.join("; ")));
+					if (a.workflow_notes) kv("Notes", c.subtext0(a.workflow_notes));
 				}
 
 				if (subagents.length > 0) {
-					console.log(`\nSubagents (${subagents.length}):`);
+					console.log(
+						`\n${c.text.bold("Subagents")} ${c.overlay1(`(${subagents.length})`)}`,
+					);
 					for (const sa of subagents) {
 						console.log(
-							`  ${sa.id} — ${sa.title ?? "untitled"} (${sa.message_count} msgs)`,
+							`  ${c.overlay0(sa.id.slice(0, 14))} ${c.subtext0(sa.title ?? "untitled")} ${c.overlay0(`(${sa.message_count} msgs)`)}`,
 						);
 					}
 				}
 
 				if (toolStats.length > 0) {
-					console.log(`\nTool usage:`);
+					console.log(`\n${c.text.bold("Tool Usage")}`);
 					for (const t of toolStats) {
-						const errStr = t.errors > 0 ? ` (${t.errors} errors)` : "";
-						console.log(`  ${t.tool_name}: ${t.count}${errStr}`);
+						const errStr =
+							t.errors > 0 ? ` ${c.catRed(`(${t.errors} errors)`)}` : "";
+						console.log(
+							`  ${c.text(t.tool_name.padEnd(20))} ${c.subtext0(String(t.count))}${errStr}`,
+						);
 					}
 				}
 			}

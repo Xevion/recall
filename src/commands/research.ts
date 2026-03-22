@@ -2,6 +2,10 @@ import { Command } from "commander";
 import { ftsIndexesExist } from "../db/fts";
 import { all, withDb } from "../db/index";
 import { escapeLike } from "../db/queries";
+import { colorStarted } from "../utils/colors";
+import { formatDate, formatTokens } from "../utils/format";
+import { createTable, printFooter } from "../utils/table";
+import { c } from "../utils/theme";
 import { parseIntOption } from "../utils/validation";
 
 interface ResearchRow {
@@ -76,16 +80,53 @@ export const researchCommand = new Command("research")
 				console.log(JSON.stringify(results, null, 2));
 			} else {
 				if (results.length === 0) {
-					console.log("No research artifacts found.");
+					console.log(c.overlay0("No research artifacts found."));
 					return;
 				}
-				for (const r of results) {
-					console.log(`${r.id}`);
-					console.log(`  Topic: ${r.topic}`);
-					console.log(`  Tags: ${r.tags}`);
-					console.log(`  Size: ${r.content_length} chars`);
-					console.log();
+
+				const hasScores = results.some((r) => r.score != null);
+				const head = ["Topic", "Tags", "Size", "Date"];
+				const colAligns: ("left" | "right")[] = [
+					"left",
+					"left",
+					"right",
+					"left",
+				];
+				const colWidths = [40, 24, 10, 18];
+
+				if (hasScores) {
+					head.push("Score");
+					colAligns.push("right");
+					colWidths.push(8);
 				}
+
+				const table = createTable({ head, colAligns, colWidths });
+
+				for (const r of results) {
+					const topic =
+						r.topic.length > 38 ? `${r.topic.slice(0, 37)}…` : r.topic;
+					const tags =
+						r.tags.join(", ").length > 22
+							? `${r.tags.join(", ").slice(0, 21)}…`
+							: r.tags.join(", ");
+					const row = [
+						c.text(topic),
+						c.subtext0(tags),
+						c.overlay1(`${formatTokens(r.content_length)} ch`),
+						colorStarted(r.created_at, formatDate(r.created_at)),
+					];
+					if (hasScores) {
+						row.push(
+							r.score != null
+								? c.catGreen(String(Math.round(r.score)))
+								: c.overlay0("—"),
+						);
+					}
+					table.push(row);
+				}
+
+				console.log(table.toString());
+				printFooter(results.length, "artifact");
 			}
 		});
 	});

@@ -8,14 +8,16 @@ import {
 } from "../db/queries";
 import {
 	colorNumeric,
+	colorOutcome,
 	colorProject,
+	colorSessionTypes,
 	colorSource,
 	colorStarted,
 	colorStatus,
 	projectDisplay,
 } from "../utils/colors";
-import { formatDate, formatDuration } from "../utils/format";
-import { createTable, normalizeScores, printFooter } from "../utils/table";
+import { formatDate, formatDuration, formatTokens } from "../utils/format";
+import { createTable, normalizeScores } from "../utils/table";
 import { c } from "../utils/theme";
 
 import {
@@ -47,86 +49,200 @@ function parseSortBy(raw: string): { field: string; dir?: "asc" | "desc" } {
 	return { field, dir: dir as "asc" | "desc" | undefined };
 }
 
-function buildRow(
-	s: SessionRow,
+interface ColumnDef {
+	name: string;
+	align: "left" | "right" | "center";
+	width: number;
+	wideWidth?: number;
+	value: (s: SessionRow, ctx: RenderContext) => string;
+}
+
+interface RenderContext {
+	wide: boolean;
+	relevanceMap?: Map<string, number>;
+}
+
+function buildColumns(
+	sessions: SessionRow[],
 	wide: boolean,
-	relevancePct?: number,
-): string[] {
-	const proj = projectDisplay(s);
-	const date = formatDate(s.started_at, wide);
-	const dur = formatDuration(s.duration_s);
-	const msgs = String(s.message_count ?? 0);
-	const turns = String(s.turn_count ?? 0);
+	hasRelevance: boolean,
+	statusFilter?: string,
+): ColumnDef[] {
+	const uniformSource =
+		sessions.length > 0 &&
+		sessions.every((s) => s.source === sessions[0]!.source);
+	const showStatus = !statusFilter;
+	const showSource = !uniformSource;
 
-	const idDisplay = wide ? s.id : s.id.slice(0, 14);
-	const row = [
-		c.overlay0(idDisplay),
-		colorSource(s.source),
-		colorProject(proj),
-		colorStarted(s.started_at, date),
-		colorNumeric(s.message_count, 15, 42, 74, msgs),
-		colorNumeric(s.turn_count, 2, 3, 7, turns),
-		colorNumeric(s.duration_s, 202, 766, 1752, dur),
-		colorStatus(s.analysis_status),
-	];
+	const cols: ColumnDef[] = [];
 
-	if (relevancePct != null) {
-		row.push(c.catGreen(`${relevancePct}%`));
+	cols.push({
+		name: "ID",
+		align: "left",
+		width: 10,
+		wideWidth: 38,
+		value: (s) => c.overlay0(wide ? s.id : s.id.slice(0, 8)),
+	});
+
+	if (showSource) {
+		cols.push({
+			name: "Source",
+			align: "left",
+			width: 13,
+			value: (s) => colorSource(s.source),
+		});
+	}
+
+	cols.push({
+		name: "Project",
+		align: "left",
+		width: 18,
+		value: (s) => colorProject(projectDisplay(s)),
+	});
+
+	cols.push({
+		name: "Started",
+		align: "left",
+		width: 18,
+		wideWidth: 24,
+		value: (s) => colorStarted(s.started_at, formatDate(s.started_at, wide)),
+	});
+
+	cols.push({
+		name: "Msgs",
+		align: "right",
+		width: 6,
+		value: (s) =>
+			colorNumeric(s.message_count, 15, 42, 74, String(s.message_count ?? 0)),
+	});
+
+	cols.push({
+		name: "Turns",
+		align: "right",
+		width: 7,
+		value: (s) =>
+			colorNumeric(s.turn_count, 2, 3, 7, String(s.turn_count ?? 0)),
+	});
+
+	cols.push({
+		name: "Duration",
+		align: "right",
+		width: 10,
+		value: (s) =>
+			colorNumeric(s.duration_s, 202, 766, 1752, formatDuration(s.duration_s)),
+	});
+
+	cols.push({
+		name: "Tokens",
+		align: "right",
+		width: 8,
+		value: (s) => {
+			const total = Number(s.token_input ?? 0) + Number(s.token_output ?? 0);
+			return colorNumeric(total, 50_000, 200_000, 500_000, formatTokens(total));
+		},
+	});
+
+	if (showStatus) {
+		cols.push({
+			name: "Status",
+			align: "left",
+			width: 14,
+			value: (s) => colorStatus(s.analysis_status),
+		});
 	}
 
 	if (wide) {
-		const summary = s.summary
-			? s.summary.length > 48
-				? `${s.summary.slice(0, 47)}…`
-				: s.summary
-			: "—";
-		row.push(s.summary ? c.subtext0(summary) : c.overlay0(summary));
+		cols.push({
+			name: "Outcome",
+			align: "left",
+			width: 9,
+			value: (s) => colorOutcome(s.outcome, s.outcome_confidence),
+		});
+
+		cols.push({
+			name: "Types",
+			align: "left",
+			width: 20,
+			value: (s) => colorSessionTypes(s.session_types),
+		});
 	}
 
-	return row;
+	if (hasRelevance) {
+		cols.push({
+			name: "Rel",
+			align: "right",
+			width: 6,
+			value: (s, ctx) => {
+				const pct = ctx.relevanceMap?.get(s.id);
+				return pct != null ? c.catGreen(`${pct}%`) : "";
+			},
+		});
+	}
+
+	// Summary always shown — wider in wide mode
+	cols.push({
+		name: "Summary",
+		align: "left",
+		width: 34,
+		wideWidth: 50,
+		value: (s) => {
+			const maxLen = wide ? 48 : 32;
+			const summary = s.summary
+				? s.summary.length > maxLen
+					? `${s.summary.slice(0, maxLen - 1)}…`
+					: s.summary
+				: "—";
+			return s.summary ? c.subtext0(summary) : c.overlay0(summary);
+		},
+	});
+
+	return cols;
+}
+
+function printAggregateFooter(sessions: SessionRow[]): void {
+	const count = sessions.length;
+	if (count === 0) {
+		console.log(c.overlay0("  No sessions found."));
+		return;
+	}
+
+	const totalDuration = sessions.reduce(
+		(sum, s) => sum + Number(s.duration_s ?? 0),
+		0,
+	);
+	const totalTokens = sessions.reduce(
+		(sum, s) => sum + Number(s.token_input ?? 0) + Number(s.token_output ?? 0),
+		0,
+	);
+	const totalTurns = sessions.reduce(
+		(sum, s) => sum + Number(s.turn_count ?? 0),
+		0,
+	);
+
+	const parts = [
+		`${count} session${count === 1 ? "" : "s"}`,
+		formatDuration(totalDuration),
+		`${formatTokens(totalTokens)} tokens`,
+		`${totalTurns} turns`,
+	];
+
+	console.log(c.overlay1(`\n${parts.join(c.surface1("  ·  "))}`));
 }
 
 function renderTable(
 	sessions: SessionRow[],
 	wide: boolean,
 	relevanceMap?: Map<string, number>,
+	statusFilter?: string,
 ): void {
-	const hasRelevance = relevanceMap && relevanceMap.size > 0;
-	const head = [
-		"ID",
-		"Source",
-		"Project",
-		"Started",
-		"Messages",
-		"Turns",
-		"Duration",
-		"Status",
-	];
-	const colAligns: ("left" | "right" | "center")[] = [
-		"left",
-		"left",
-		"left",
-		"left",
-		"right",
-		"right",
-		"right",
-		"left",
-	];
-	const colWidths = wide
-		? [38, 13, 18, 24, 10, 7, 10, 14]
-		: [16, 13, 18, 18, 10, 7, 10, 14];
+	const hasRelevance = !!relevanceMap && relevanceMap.size > 0;
+	const cols = buildColumns(sessions, wide, hasRelevance, statusFilter);
 
-	if (hasRelevance) {
-		head.push("Rel");
-		colAligns.push("right");
-		colWidths.push(6);
-	}
-
-	if (wide) {
-		head.push("Summary");
-		colAligns.push("left");
-		colWidths.push(50);
-	}
+	const head = cols.map((col) => col.name);
+	const colAligns = cols.map((col) => col.align);
+	const colWidths = cols.map((col) =>
+		wide && col.wideWidth ? col.wideWidth : col.width,
+	);
 
 	const table = createTable({ head, colAligns, colWidths });
 
@@ -136,13 +252,13 @@ function renderTable(
 		return;
 	}
 
+	const ctx: RenderContext = { wide, relevanceMap };
 	for (const s of sessions) {
-		const pct = hasRelevance ? relevanceMap.get(s.id) : undefined;
-		table.push(buildRow(s, wide, pct));
+		table.push(cols.map((col) => col.value(s, ctx)));
 	}
 
 	console.log(table.toString());
-	printFooter(sessions.length, "session");
+	printAggregateFooter(sessions);
 }
 
 export const sessionsCommand = new Command("sessions")
@@ -222,7 +338,7 @@ export const sessionsCommand = new Command("sessions")
 				if (opts.json) {
 					console.log(JSON.stringify(results, null, 2));
 				} else {
-					renderTable(results, !!opts.wide, relevanceMap);
+					renderTable(results, !!opts.wide, relevanceMap, status);
 				}
 			} else {
 				const sessions = await listSessions(db, listOpts);
@@ -230,7 +346,7 @@ export const sessionsCommand = new Command("sessions")
 				if (opts.json) {
 					console.log(JSON.stringify(sessions, null, 2));
 				} else {
-					renderTable(sessions, !!opts.wide);
+					renderTable(sessions, !!opts.wide, undefined, status);
 					if (sessions.length === 0 && opts.project) {
 						const available = await getAvailableProjects(db);
 						const suggestions = suggestProject(opts.project, available);

@@ -90,6 +90,40 @@ export function colorNumeric(
 	return c.catRed(formatted);
 }
 
+export function colorOutcome(
+	outcome: string | null,
+	confidence: string | null,
+): string {
+	if (!outcome) return c.overlay0("—");
+	const dim = confidence === "low";
+	switch (outcome) {
+		case "completed":
+			return dim ? c.overlay2("✓ done") : c.catGreen("✓ done");
+		case "progressed":
+			return dim ? c.overlay2("~ prog") : c.teal("~ prog");
+		case "abandoned":
+			return dim ? c.overlay2("✗ drop") : c.catRed("✗ drop");
+		case "pivoted":
+			return dim ? c.overlay2("↻ pivot") : c.peach("↻ pivot");
+		default:
+			return c.overlay0(outcome);
+	}
+}
+
+export function colorSessionTypes(types: string[] | null): string {
+	if (!types || types.length === 0) return c.overlay0("—");
+	const abbrev: Record<string, string> = {
+		implementation: "impl",
+		exploration: "explore",
+		debugging: "debug",
+		planning: "plan",
+		review: "review",
+		maintenance: "maint",
+		research: "research",
+	};
+	return types.map((t) => c.overlay2(abbrev[t] ?? t)).join(c.surface1(","));
+}
+
 export function projectDisplay(row: {
 	project_path: string | null;
 	project_name?: string | null;

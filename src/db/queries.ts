@@ -22,6 +22,9 @@ export interface SessionRow {
 	duration_s: number;
 	analysis_status: string | null;
 	summary: string | null;
+	session_types: string[] | null;
+	outcome: string | null;
+	outcome_confidence: string | null;
 }
 
 const SORT_COLUMNS: Record<string, string> = {
@@ -98,7 +101,8 @@ export async function listSessions(
 		`SELECT s.id, s.source, s.parent_id, s.project_path, s.project_name,
 		        s.title, s.started_at, s.ended_at,
 		        s.message_count, s.turn_count, s.token_input, s.token_output,
-		        s.duration_s, a.status AS analysis_status, a.summary
+		        s.duration_s, a.status AS analysis_status, a.summary,
+		        a.session_types, a.outcome, a.outcome_confidence
 		 FROM session s
 		 LEFT JOIN analysis a ON a.session_id = s.id
 		 ${where}
@@ -401,6 +405,7 @@ export async function searchSessions(
 			        s.title, s.started_at, s.ended_at,
 			        s.message_count, s.turn_count, s.token_input, s.token_output,
 			        s.duration_s, a.status AS analysis_status, a.summary,
+			        a.session_types, a.outcome, a.outcome_confidence,
 			        0.0 AS relevance
 			 FROM session s
 			 LEFT JOIN analysis a ON a.session_id = s.id
@@ -489,6 +494,7 @@ export async function searchSessions(
 		       s.title, s.started_at, s.ended_at,
 		       s.message_count, s.turn_count, s.token_input, s.token_output,
 		       s.duration_s, a.status AS analysis_status, a.summary,
+		       a.session_types, a.outcome, a.outcome_confidence,
 		       c.relevance
 		FROM combined c
 		JOIN session s ON c.session_id = s.id

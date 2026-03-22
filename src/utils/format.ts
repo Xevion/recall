@@ -19,7 +19,26 @@ export function formatDate(iso: string, wide = false): string {
 	if (diffDays === 1)
 		return `Yesterday ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 	if (diffDays < 7) return `${diffDays}d ago`;
-	return d.toLocaleDateString();
+	if (diffDays < 14) return "1w ago";
+	if (diffDays < 21) return "2w ago";
+	if (diffDays < 28) return "3w ago";
+	const months = [
+		"Jan",
+		"Feb",
+		"Mar",
+		"Apr",
+		"May",
+		"Jun",
+		"Jul",
+		"Aug",
+		"Sep",
+		"Oct",
+		"Nov",
+		"Dec",
+	];
+	const month = months[d.getMonth()];
+	if (d.getFullYear() === now.getFullYear()) return `${month} ${d.getDate()}`;
+	return `${month} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
 export function formatTokens(n: number): string {

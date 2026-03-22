@@ -4,6 +4,7 @@ import { getLogger } from "@logtape/logtape";
 import Ajv from "ajv/dist/2020";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
+import { escapeLike } from "../db/queries";
 import { buildAnalysisPrompt } from "./prompt";
 import { type AnalysisOutput, analysisSchema } from "./schema";
 import { type TriageInput, triageSession } from "./triage";
@@ -52,9 +53,23 @@ For subagent sessions, focus on:
 
 Be concise.`;
 
+export interface CandidateSession {
+	id: string;
+	message_count: number;
+	turn_count: number;
+	duration_s: number;
+	parent_id: string | null;
+	has_tool_calls: boolean;
+	has_subagents: boolean;
+	has_errors: boolean;
+}
+
 export interface AnalyzeOptions {
 	limit?: number;
 	force?: string;
+	project?: string;
+	since?: string;
+	dryRun?: boolean;
 }
 
 export interface AnalyzeResult {
@@ -62,6 +77,41 @@ export interface AnalyzeResult {
 	skipped: number;
 	errors: number;
 	refused: number;
+}
+
+const CANDIDATE_SELECT = `SELECT s.id, s.message_count, s.turn_count, s.duration_s, s.parent_id,
+	   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id) as has_tool_calls,
+	   EXISTS(SELECT 1 FROM session c WHERE c.parent_id = s.id) as has_subagents,
+	   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id AND is_error = TRUE) as has_errors
+	 FROM session s
+	 JOIN analysis a ON s.id = a.session_id`;
+
+export async function getCandidateSessions(
+	db: DuckDBConnection,
+	opts: Pick<AnalyzeOptions, "limit" | "project" | "since">,
+): Promise<CandidateSession[]> {
+	const conditions: string[] = ["a.status IN ('pending', 'retry_pending')"];
+	const params: unknown[] = [];
+
+	if (opts.project) {
+		const escaped = escapeLike(opts.project);
+		conditions.push(
+			"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
+		);
+		params.push(`%${escaped}%`, `%${escaped}%`);
+	}
+
+	if (opts.since) {
+		conditions.push("s.started_at >= ?");
+		params.push(opts.since);
+	}
+
+	const where =
+		conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+	const sql = `${CANDIDATE_SELECT}${where} ORDER BY s.started_at DESC LIMIT ?`;
+	params.push(opts.limit ?? 100);
+
+	return all<CandidateSession>(db, sql, ...params);
 }
 
 export async function analyze(
@@ -75,17 +125,6 @@ export async function analyze(
 		errors: 0,
 		refused: 0,
 	};
-
-	interface CandidateSession {
-		id: string;
-		message_count: number;
-		turn_count: number;
-		duration_s: number;
-		parent_id: string | null;
-		has_tool_calls: boolean;
-		has_subagents: boolean;
-		has_errors: boolean;
-	}
 
 	let sessions: CandidateSession[];
 
@@ -126,19 +165,7 @@ export async function analyze(
 			opts.force,
 		);
 	} else {
-		sessions = await all<CandidateSession>(
-			db,
-			`SELECT s.id, s.message_count, s.turn_count, s.duration_s, s.parent_id,
-			   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id) as has_tool_calls,
-			   EXISTS(SELECT 1 FROM session c WHERE c.parent_id = s.id) as has_subagents,
-			   EXISTS(SELECT 1 FROM tool_call WHERE session_id = s.id AND is_error = TRUE) as has_errors
-			 FROM session s
-			 JOIN analysis a ON s.id = a.session_id
-			 WHERE a.status IN ('pending', 'retry_pending')
-			 ORDER BY s.started_at DESC
-			 LIMIT ?`,
-			opts.limit ?? 100,
-		);
+		sessions = await getCandidateSessions(db, opts);
 	}
 
 	logger.debug("{count} candidate session(s) found", {
@@ -182,6 +209,11 @@ export async function analyze(
 			});
 			toAnalyze.push(session);
 		}
+	}
+
+	if (opts.dryRun) {
+		result.analyzed = toAnalyze.length;
+		return result;
 	}
 
 	logger.debug("{count} session(s) to analyze in chunks of {parallelism}", {

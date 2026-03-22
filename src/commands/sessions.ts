@@ -24,6 +24,7 @@ import {
 	parseIntOption,
 	parseRelativeDate,
 	resolveEnumOption,
+	resolveProjectOption,
 	resolveSourceOption,
 	suggestProject,
 } from "../utils/validation";
@@ -267,7 +268,10 @@ export const sessionsCommand = new Command("sessions")
 		"-q, --query <text>",
 		"Full-text search across messages and summaries",
 	)
-	.option("-p, --project <name>", "Filter by project name")
+	.option(
+		"-p, --project [name]",
+		"Filter by project (auto-detects from cwd if no name given)",
+	)
 	.option("-s, --source <type>", "Filter by source (claude-code, opencode)")
 	.option("--since <date>", "Sessions after this date")
 	.option("-l, --limit <n>", "Number of sessions to show", "20")
@@ -305,6 +309,7 @@ export const sessionsCommand = new Command("sessions")
 			: undefined;
 		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
 		const limit = parseIntOption(opts.limit, "limit");
+		const project = resolveProjectOption(opts.project);
 		const minTurns = opts.minTurns
 			? parseIntOption(opts.minTurns, "min-turns")
 			: undefined;
@@ -316,7 +321,7 @@ export const sessionsCommand = new Command("sessions")
 			: undefined;
 
 		const listOpts = {
-			project: opts.project,
+			project,
 			source,
 			since,
 			limit,
@@ -347,9 +352,9 @@ export const sessionsCommand = new Command("sessions")
 					console.log(JSON.stringify(sessions, null, 2));
 				} else {
 					renderTable(sessions, !!opts.wide, undefined, status);
-					if (sessions.length === 0 && opts.project) {
+					if (sessions.length === 0 && project) {
 						const available = await getAvailableProjects(db);
-						const suggestions = suggestProject(opts.project, available);
+						const suggestions = suggestProject(project, available);
 						if (suggestions.length > 0) {
 							console.log(
 								c.overlay1(`  Did you mean: ${suggestions.join(", ")}?`),

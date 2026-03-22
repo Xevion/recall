@@ -6,7 +6,11 @@ import { colorProject, colorStarted, projectDisplay } from "../utils/colors";
 import { formatDate, termWidth, wordWrap } from "../utils/format";
 import { printFooter } from "../utils/table";
 import { c } from "../utils/theme";
-import { parseRelativeDate, suggestProject } from "../utils/validation";
+import {
+	parseRelativeDate,
+	resolveProjectOption,
+	suggestProject,
+} from "../utils/validation";
 
 const CONTENT_INDENT = 2;
 const BULLET_PREFIX = "! ";
@@ -16,11 +20,15 @@ export const frustrationsCommand = new Command("frustrations")
 	.description("Show detected frustrations and pain points")
 	.option("-q, --query <text>", "Search frustrations and summaries")
 	.option("--since <date>", "Filter by date")
-	.option("-p, --project <name>", "Filter by project")
+	.option(
+		"-p, --project [name]",
+		"Filter by project (auto-detects from cwd if no name given)",
+	)
 	.option("--include-refused", "Include sessions where analysis was refused")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
 		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
+		const project = resolveProjectOption(opts.project);
 
 		await withDb(async (db) => {
 			const conditions = [
@@ -35,8 +43,8 @@ export const frustrationsCommand = new Command("frustrations")
 				conditions.push("s.started_at >= ?");
 				params.push(since);
 			}
-			if (opts.project) {
-				const escaped = escapeLike(opts.project);
+			if (project) {
+				const escaped = escapeLike(project);
 				conditions.push(
 					"(s.project_name ILIKE ? ESCAPE '\\' OR s.project_path ILIKE ? ESCAPE '\\')",
 				);
@@ -104,9 +112,9 @@ export const frustrationsCommand = new Command("frustrations")
 			} else {
 				if (results.length === 0) {
 					console.log("No frustrations detected.");
-					if (opts.project) {
+					if (project) {
 						const available = await getAvailableProjects(db);
-						const suggestions = suggestProject(opts.project, available);
+						const suggestions = suggestProject(project, available);
 						if (suggestions.length > 0) {
 							console.log(
 								c.overlay1(`Did you mean: ${suggestions.join(", ")}?`),

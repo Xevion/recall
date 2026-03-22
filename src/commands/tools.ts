@@ -7,6 +7,7 @@ import { c } from "../utils/theme";
 import {
 	parseRelativeDate,
 	resolveEnumOption,
+	resolveProjectOption,
 	suggestProject,
 } from "../utils/validation";
 
@@ -17,17 +18,21 @@ const VALID_SORTS = ["frequency", "errors", "duration"] as const;
 export const toolsCommand = new Command("tools")
 	.description("Tool usage breakdown across sessions")
 	.option("--since <date>", "Filter by date")
-	.option("-p, --project <name>", "Filter by project")
+	.option(
+		"-p, --project [name]",
+		"Filter by project (auto-detects from cwd if no name given)",
+	)
 	.option("--sort <by>", "Sort by: frequency, errors, duration", "frequency")
 	.option("--json", "Output as JSON")
 	.action(async (opts) => {
 		const sort = resolveEnumOption(opts.sort, VALID_SORTS, "sort");
 		const since = opts.since ? parseRelativeDate(opts.since) : undefined;
+		const project = resolveProjectOption(opts.project);
 
 		await withDb(async (db) => {
 			const stats = await getToolStats(db, {
 				since,
-				project: opts.project,
+				project,
 				sort,
 			});
 
@@ -57,9 +62,9 @@ export const toolsCommand = new Command("tools")
 				console.log(table.toString());
 				printFooter(stats.length, "tool");
 
-				if (stats.length === 0 && opts.project) {
+				if (stats.length === 0 && project) {
 					const available = await getAvailableProjects(db);
-					const suggestions = suggestProject(opts.project, available);
+					const suggestions = suggestProject(project, available);
 					if (suggestions.length > 0) {
 						logger.warn("Did you mean: {suggestions}?", {
 							suggestions: suggestions.join(", "),

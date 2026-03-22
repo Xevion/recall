@@ -1,3 +1,5 @@
+import { extractProjectName } from "./path";
+
 /** Thrown by validation functions for clean CLI error output. */
 export class ValidationError extends Error {
 	constructor(message: string) {
@@ -135,6 +137,24 @@ export function parseRelativeDate(value: string, optionName = "since"): string {
  * Suggest project names matching the user's input.
  * Returns up to 5 substring matches (case-insensitive).
  */
+/**
+ * Resolve the --project CLI option which accepts an optional argument.
+ * - undefined: no flag given, no filter
+ * - true: bare --project flag, auto-detect from cwd
+ * - string: explicit project name
+ */
+export function resolveProjectOption(
+	value: string | boolean | undefined,
+): string | undefined {
+	if (value === undefined) return undefined;
+	if (value === true) {
+		const detected = extractProjectName(process.cwd());
+		if (!detected) return undefined;
+		return detected;
+	}
+	return value;
+}
+
 export function suggestProject(input: string, available: string[]): string[] {
 	const lower = input.toLowerCase();
 	return available.filter((p) => p.toLowerCase().includes(lower)).slice(0, 5);

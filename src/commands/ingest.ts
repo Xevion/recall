@@ -1,6 +1,9 @@
+import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { withDb } from "../db/index";
 import { ingest } from "../ingest/index";
+
+const logger = getLogger(["recall", "cli", "ingest"]);
 
 export const ingestCommand = new Command("ingest")
 	.description("Ingest sessions from AI coding assistants into the database")
@@ -20,11 +23,13 @@ export const ingestCommand = new Command("ingest")
 			});
 
 			for (const r of results) {
-				console.log(
-					`${r.source}: ${r.sessionsIngested} ingested, ${r.sessionsSkipped} skipped`,
-				);
+				logger.info("{source}: {ingested} ingested, {skipped} skipped", {
+					source: r.source,
+					ingested: r.sessionsIngested,
+					skipped: r.sessionsSkipped,
+				});
 				for (const err of r.errors) {
-					console.error(`  error: ${err}`);
+					logger.error("{source}: {error}", { source: r.source, error: err });
 				}
 			}
 		});

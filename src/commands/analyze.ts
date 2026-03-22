@@ -1,8 +1,11 @@
+import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { analyze } from "../analyze/index";
 import { withDb } from "../db/index";
 import { resolveSessionId } from "../db/queries";
 import { parseIntOption } from "../utils/validation";
+
+const logger = getLogger(["recall", "cli", "analyze"]);
 
 export const analyzeCommand = new Command("analyze")
 	.description("Run AI analysis on pending sessions")
@@ -18,8 +21,9 @@ export const analyzeCommand = new Command("analyze")
 				limit: parseIntOption(opts.limit, "limit"),
 				force,
 			});
-			console.log(
-				`Analyzed: ${result.analyzed}, Skipped: ${result.skipped}, Errors: ${result.errors}, Refused: ${result.refused}`,
+			logger.info(
+				"Analyzed: {analyzed}, Skipped: {skipped}, Errors: {errors}, Refused: {refused}",
+				{ ...result },
 			);
 		});
 	});

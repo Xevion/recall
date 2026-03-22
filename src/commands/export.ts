@@ -1,8 +1,11 @@
+import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { all, withDb } from "../db/index";
 import { resolveSessionId } from "../db/queries";
 import { formatDuration } from "../utils/format";
 import { extractProjectName } from "../utils/path";
+
+const logger = getLogger(["recall", "cli", "export"]);
 
 interface SessionDetail {
 	id: string;
@@ -68,7 +71,9 @@ export const exportCommand = new Command("export")
 	.action(async (sessionId, opts) => {
 		const format = opts.format as string;
 		if (format !== "json" && format !== "md") {
-			console.error(`Invalid format "${format}" — use "json" or "md"`);
+			logger.error('Invalid format "{format}" — use "json" or "md"', {
+				format,
+			});
 			process.exit(1);
 		}
 
@@ -81,7 +86,7 @@ export const exportCommand = new Command("export")
 				resolved,
 			);
 			if (!session) {
-				console.error(`Session not found: ${sessionId}`);
+				logger.error("Session not found: {sessionId}", { sessionId });
 				process.exit(1);
 			}
 

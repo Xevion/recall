@@ -13,7 +13,7 @@ import { showCommand } from "./commands/show";
 import { statsCommand } from "./commands/stats";
 import { toolsCommand } from "./commands/tools";
 import { close } from "./db/index";
-import { setQuiet, setVerbosity } from "./utils/logger";
+import { setupLogging, teardownLogging } from "./logging/setup";
 import { ValidationError } from "./utils/validation";
 
 const program = new Command()
@@ -27,10 +27,14 @@ const program = new Command()
 		0,
 	)
 	.option("-q, --quiet", "Suppress non-essential output")
-	.hook("preAction", (_thisCommand) => {
+	.option("--log-file <path>", "Write JSONL logs to file")
+	.hook("preAction", async (_thisCommand) => {
 		const opts = program.opts();
-		setVerbosity(opts.verbose as number);
-		if (opts.quiet) setQuiet(true);
+		await setupLogging({
+			verbosity: opts.verbose as number,
+			quiet: !!opts.quiet,
+			logFile: opts.logFile as string | undefined,
+		});
 	});
 
 program.addCommand(ingestCommand);
@@ -46,8 +50,8 @@ program.addCommand(researchCommand);
 program.addCommand(projectsCommand);
 program.addCommand(statsCommand);
 
-// Graceful shutdown: close the DuckDB connection before exit.
 async function shutdown(): Promise<void> {
+	await teardownLogging();
 	await close();
 	process.exit(0);
 }
@@ -55,9 +59,10 @@ async function shutdown(): Promise<void> {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-program.parseAsync().catch((err) => {
+program.parseAsync().catch(async (err) => {
 	if (err instanceof ValidationError) {
 		console.error(err.message);
+		await teardownLogging();
 		process.exit(1);
 	}
 	throw err;

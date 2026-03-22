@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { withDb } from "../db/index";
 import { getAvailableProjects, getToolStats } from "../db/queries";
@@ -8,6 +9,8 @@ import {
 	resolveEnumOption,
 	suggestProject,
 } from "../utils/validation";
+
+const logger = getLogger(["recall", "cli", "tools"]);
 
 const VALID_SORTS = ["frequency", "errors", "duration"] as const;
 
@@ -58,9 +61,9 @@ export const toolsCommand = new Command("tools")
 					const available = await getAvailableProjects(db);
 					const suggestions = suggestProject(opts.project, available);
 					if (suggestions.length > 0) {
-						console.error(
-							c.overlay1(`Did you mean: ${suggestions.join(", ")}?`),
-						);
+						logger.warn("Did you mean: {suggestions}?", {
+							suggestions: suggestions.join(", "),
+						});
 					}
 				}
 			}

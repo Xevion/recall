@@ -1,3 +1,4 @@
+import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { all, withDb } from "../db/index";
 import { resolveSessionId } from "../db/queries";
@@ -56,6 +57,8 @@ interface ToolStatRow {
 	count: number;
 	errors: number;
 }
+
+const logger = getLogger(["recall", "cli", "show"]);
 
 const LABEL_WIDTH = 12;
 const INDENT = 2;
@@ -129,7 +132,7 @@ export const showCommand = new Command("show")
 				resolved,
 			);
 			if (!session) {
-				console.error(`Session not found: ${sessionId}`);
+				logger.error("Session not found: {sessionId}", { sessionId });
 				process.exit(1);
 			}
 

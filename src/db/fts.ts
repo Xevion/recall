@@ -1,6 +1,8 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
-import { debug } from "../utils/logger";
+import { getLogger } from "@logtape/logtape";
 import { all } from "./index";
+
+const logger = getLogger(["recall", "db", "fts"]);
 
 interface FtsIndexConfig {
 	table: string;
@@ -28,12 +30,15 @@ export async function rebuildFtsIndexes(conn: DuckDBConnection): Promise<void> {
 	for (const idx of FTS_INDEXES) {
 		const cols = idx.columns.map((c) => `'${c}'`).join(", ");
 		const pragma = `PRAGMA create_fts_index('${idx.table}', '${idx.idColumn}', ${cols}, stemmer='english', stopwords='english', overwrite=1)`;
-		debug(`fts: rebuilding index on ${idx.table}(${idx.columns.join(", ")})`);
+		logger.debug("Rebuilding index on {table}({columns})", {
+			table: idx.table,
+			columns: idx.columns.join(", "),
+		});
 		await conn.run(pragma);
 	}
 
 	const elapsed = Math.round(performance.now() - start);
-	debug(`fts: all indexes rebuilt in ${elapsed}ms`);
+	logger.debug("All indexes rebuilt in {elapsed}ms", { elapsed });
 }
 
 export async function ftsIndexesExist(

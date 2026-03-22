@@ -1,6 +1,9 @@
+import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { rebuildFtsIndexes } from "../db/fts";
 import { withDb } from "../db/index";
+
+const logger = getLogger(["recall", "cli", "fts"]);
 
 const rebuildCommand = new Command("rebuild")
 	.description("Rebuild all full-text search indexes")
@@ -10,7 +13,7 @@ const rebuildCommand = new Command("rebuild")
 			await rebuildFtsIndexes(db);
 		});
 		const elapsed = Math.round(performance.now() - start);
-		console.log(`FTS indexes rebuilt in ${elapsed}ms`);
+		logger.info("FTS indexes rebuilt in {elapsed}ms", { elapsed });
 	});
 
 export const ftsCommand = new Command("fts")

@@ -203,8 +203,8 @@ function formatToolCalls(tools: ToolCallRow[]): string[] {
 		let runEnd = i + 1;
 		while (
 			runEnd < tools.length &&
-			tools[runEnd]!.tool_name === tc.tool_name &&
-			!tools[runEnd]!.is_error
+			tools[runEnd]?.tool_name === tc.tool_name &&
+			!tools[runEnd]?.is_error
 		) {
 			runEnd++;
 		}
@@ -214,7 +214,7 @@ function formatToolCalls(tools: ToolCallRow[]): string[] {
 			// Collapse: collect unique summaries
 			const summaries = new Set<string>();
 			for (let j = i; j < runEnd; j++) {
-				const summary = tools[j]!.input_summary;
+				const summary = tools[j]?.input_summary;
 				if (summary) summaries.add(summary);
 			}
 			const summaryStr =

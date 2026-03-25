@@ -1,4 +1,5 @@
-default: check
+default:
+    @just --list
 
 # Type-check and lint
 check:

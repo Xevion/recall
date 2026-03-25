@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { withDb } from "../db/index";
-import type { SearchMode, SearchResult } from "../db/queries";
+import type { SearchMode } from "../db/queries";
 import { searchContent } from "../db/queries";
 import { termWidth, wordWrap } from "../utils/format";
 import { normalizeScores, printFooter } from "../utils/table";

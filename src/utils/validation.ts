@@ -147,7 +147,8 @@ export function resolveProjectOption(
 	value: string | boolean | undefined,
 ): string | undefined {
 	if (value === undefined) return undefined;
-	if (value === true) {
+	if (typeof value === "boolean") {
+		if (!value) return undefined;
 		const detected = extractProjectName(process.cwd());
 		if (!detected) return undefined;
 		return detected;

@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { withDb } from "../db/index";
-import type { SessionRow, SessionSearchRow } from "../db/queries";
+import type { SessionRow } from "../db/queries";
 import {
 	getAvailableProjects,
 	listSessions,
@@ -71,7 +71,7 @@ function buildColumns(
 ): ColumnDef[] {
 	const uniformSource =
 		sessions.length > 0 &&
-		sessions.every((s) => s.source === sessions[0]!.source);
+		sessions.every((s) => s.source === sessions[0]?.source);
 	const showStatus = !statusFilter;
 	const showSource = !uniformSource;
 

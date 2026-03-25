@@ -1,9 +1,13 @@
 import { Database as SQLiteDB } from "bun:sqlite";
 import type { DuckDBConnection } from "@duckdb/node-api";
+import { getLogger } from "@logtape/logtape";
 import { all, run } from "../db/index";
 import { expandPath, extractProjectName } from "../utils/path";
 import type { IngestOptions, IngestResult } from "./index";
 import { persistSession } from "./persist";
+
+const logger = getLogger(["recall", "ingest", "opencode"]);
+
 import type {
 	NormalizedMessage,
 	NormalizedSession,
@@ -15,13 +19,16 @@ export async function ingestOpenCode(
 	db: DuckDBConnection,
 	dbPath: string,
 	opts: IngestOptions,
+	signal?: AbortSignal,
 ): Promise<IngestResult> {
+	const fnStart = performance.now();
 	const expandedPath = expandPath(dbPath);
 	const result: IngestResult = {
 		source: "opencode",
 		sessionsIngested: 0,
 		sessionsSkipped: 0,
 		errors: [],
+		elapsedMs: 0,
 	};
 
 	let sqlite: SQLiteDB;
@@ -50,7 +57,31 @@ export async function ingestOpenCode(
 			)
 			.all();
 
+		logger.info("Found {count} sessions", { count: sessions.length });
+
+		const startTime = performance.now();
+		let lastLogTime = startTime;
+		let processed = 0;
+
 		for (const ocSession of sessions) {
+			if (signal?.aborted) {
+				logger.info("Ingest interrupted after {processed}/{total} sessions", {
+					processed,
+					total: sessions.length,
+				});
+				break;
+			}
+			processed++;
+			const now = performance.now();
+			if (now - lastLogTime >= 5000) {
+				logger.info("Processing: {processed}/{total} sessions ({elapsed}s)", {
+					processed,
+					total: sessions.length,
+					elapsed: ((now - startTime) / 1000).toFixed(1),
+				});
+				lastLogTime = now;
+			}
+			logger.debug("Processing {session}", { session: ocSession.id });
 			try {
 				const sessionId = `oc-${ocSession.id}`;
 
@@ -79,6 +110,10 @@ export async function ingestOpenCode(
 					result.sessionsIngested++;
 				}
 			} catch (err) {
+				logger.debug("Error processing {session}: {error}", {
+					session: ocSession.id,
+					error: String(err),
+				});
 				result.errors.push(`session ${ocSession.id}: ${err}`);
 			}
 		}
@@ -86,6 +121,7 @@ export async function ingestOpenCode(
 		sqlite.close();
 	}
 
+	result.elapsedMs = Math.round(performance.now() - fnStart);
 	return result;
 }
 

@@ -1,4 +1,7 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
+import { getLogger } from "@logtape/logtape";
+
+const logger = getLogger(["recall", "db", "schema"]);
 
 async function enumExists(
 	conn: DuckDBConnection,
@@ -12,6 +15,7 @@ async function enumExists(
 }
 
 export async function initSchema(conn: DuckDBConnection): Promise<void> {
+	logger.debug("Initializing schema");
 	await conn.run("INSTALL fts");
 	await conn.run("LOAD fts");
 
@@ -127,4 +131,6 @@ export async function initSchema(conn: DuckDBConnection): Promise<void> {
 			ingested_at TIMESTAMPTZ DEFAULT now()
 		)
 	`);
+
+	logger.debug("Schema initialized");
 }

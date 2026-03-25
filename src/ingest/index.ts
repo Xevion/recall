@@ -18,11 +18,13 @@ export interface IngestResult {
 	sessionsIngested: number;
 	sessionsSkipped: number;
 	errors: string[];
+	elapsedMs: number;
 }
 
 export async function ingest(
 	conn: DuckDBConnection,
 	opts: IngestOptions,
+	signal?: AbortSignal,
 ): Promise<IngestResult[]> {
 	const config = await loadConfig();
 	const results: IngestResult[] = [];
@@ -36,6 +38,7 @@ export async function ingest(
 			conn,
 			config.sources["claude-code"].path,
 			opts,
+			signal,
 		);
 		results.push(result);
 	}
@@ -48,17 +51,18 @@ export async function ingest(
 			conn,
 			config.sources.opencode.path,
 			opts,
+			signal,
 		);
 		results.push(result);
 	}
 
 	const totalIngested = results.reduce((s, r) => s + r.sessionsIngested, 0);
 	if (totalIngested > 0) {
-		logger.debug("Rebuilding FTS indexes after ingest");
+		logger.info("Rebuilding FTS indexes after ingest");
 		const start = performance.now();
 		await rebuildFtsIndexes(conn);
 		const elapsed = Math.round(performance.now() - start);
-		logger.debug("FTS indexes rebuilt in {elapsed}ms", { elapsed });
+		logger.info("FTS indexes rebuilt in {elapsed}ms", { elapsed });
 	}
 
 	return results;

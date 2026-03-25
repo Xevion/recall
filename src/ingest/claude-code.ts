@@ -1,8 +1,12 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
+import { getLogger } from "@logtape/logtape";
 import { all, run } from "../db/index";
 import { expandPath, extractProjectName } from "../utils/path";
 import type { IngestOptions, IngestResult } from "./index";
 import { persistSession } from "./persist";
+
+const logger = getLogger(["recall", "ingest", "claude-code"]);
+
 import type {
 	NormalizedMessage,
 	NormalizedSession,
@@ -14,13 +18,16 @@ export async function ingestClaudeCode(
 	db: DuckDBConnection,
 	basePath: string,
 	opts: IngestOptions,
+	signal?: AbortSignal,
 ): Promise<IngestResult> {
+	const fnStart = performance.now();
 	const expandedPath = expandPath(basePath);
 	const result: IngestResult = {
 		source: "claude-code",
 		sessionsIngested: 0,
 		sessionsSkipped: 0,
 		errors: [],
+		elapsedMs: 0,
 	};
 
 	// Find all session JSONL files (top-level, not in subagents/)
@@ -33,7 +40,33 @@ export async function ingestClaudeCode(
 		sessionFiles.push(path);
 	}
 
+	logger.info("Found {count} session files", { count: sessionFiles.length });
+
+	const startTime = performance.now();
+	let lastLogTime = startTime;
+	let processed = 0;
+
 	for (const filePath of sessionFiles) {
+		if (signal?.aborted) {
+			logger.info("Ingest interrupted after {processed}/{total} files", {
+				processed,
+				total: sessionFiles.length,
+			});
+			break;
+		}
+		processed++;
+		const now = performance.now();
+		if (now - lastLogTime >= 5000) {
+			logger.info("Processing: {processed}/{total} files ({elapsed}s)", {
+				processed,
+				total: sessionFiles.length,
+				elapsed: ((now - startTime) / 1000).toFixed(1),
+			});
+			lastLogTime = now;
+		}
+		logger.debug("Processing {file}", {
+			file: filePath.split("/").slice(-2).join("/"),
+		});
 		try {
 			// Check ingest_log for idempotency
 			if (!opts.force) {
@@ -84,10 +117,15 @@ export async function ingestClaudeCode(
 				result.sessionsIngested++;
 			}
 		} catch (err) {
+			logger.debug("Error processing {file}: {error}", {
+				file: filePath,
+				error: String(err),
+			});
 			result.errors.push(`${filePath}: ${err}`);
 		}
 	}
 
+	result.elapsedMs = Math.round(performance.now() - fnStart);
 	return result;
 }
 

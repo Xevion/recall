@@ -5,6 +5,7 @@ import Ajv from "ajv/dist/2020";
 import { loadConfig } from "../config";
 import { all, run } from "../db/index";
 import { escapeLike } from "../db/queries";
+import { runPool } from "../utils/pool";
 import { buildAnalysisPrompt } from "./prompt";
 import { type AnalysisOutput, analysisSchema } from "./schema";
 import { type TriageInput, triageSession } from "./triage";
@@ -117,6 +118,7 @@ export async function getCandidateSessions(
 export async function analyze(
 	db: DuckDBConnection,
 	opts: AnalyzeOptions,
+	signal?: AbortSignal,
 ): Promise<AnalyzeResult> {
 	const config = await loadConfig();
 	const result: AnalyzeResult = {
@@ -140,7 +142,7 @@ export async function analyze(
 	);
 	const staleProcessing = recovered[0]?.cnt ?? 0;
 	if (staleProcessing > 0) {
-		logger.debug("Recovering {count} orphaned 'processing' session(s)", {
+		logger.info("Recovering {count} orphaned 'processing' session(s)", {
 			count: staleProcessing,
 		});
 		await run(
@@ -168,7 +170,7 @@ export async function analyze(
 		sessions = await getCandidateSessions(db, opts);
 	}
 
-	logger.debug("{count} candidate session(s) found", {
+	logger.info("{count} candidate session(s) found", {
 		count: sessions.length,
 	});
 
@@ -216,45 +218,75 @@ export async function analyze(
 		return result;
 	}
 
-	logger.debug("{count} session(s) to analyze in chunks of {parallelism}", {
+	logger.info("{count} session(s) to analyze (parallelism={parallelism})", {
 		count: toAnalyze.length,
 		parallelism: config.analyze.parallelism,
 	});
-	const chunks = chunkArray(toAnalyze, config.analyze.parallelism);
+
+	let completedCount = 0;
+	const totalToAnalyze = toAnalyze.length;
+
+	const onProgress = (
+		sessionId: string,
+		outcome: string,
+		topicCount: number,
+	) => {
+		completedCount++;
+		logger.info(
+			"Analyzed {current}/{total}: {sessionId} ({outcome}, {topics} topics)",
+			{
+				current: completedCount,
+				total: totalToAnalyze,
+				sessionId: sessionId.slice(0, 8),
+				outcome,
+				topics: topicCount,
+			},
+		);
+	};
+
+	const tasks = toAnalyze.map((session) => {
+		return () =>
+			analyzeSession(db, session.id, session.parent_id, config, onProgress);
+	});
+
 	let consecutiveFailures = 0;
 
-	for (let i = 0; i < chunks.length; i++) {
-		if (consecutiveFailures >= config.analyze.max_consecutive_failures) {
-			logger.debug(
-				"Circuit breaker: {failures} consecutive failures, aborting",
-				{ failures: consecutiveFailures },
-			);
-			break;
-		}
-
-		const chunk = chunks[i];
-		if (!chunk) continue;
-		const results = await Promise.all(
-			chunk.map((session) =>
-				analyzeSession(db, session.id, session.parent_id, config),
-			),
-		);
-
-		for (const r of results) {
-			if (r === "complete") {
-				result.analyzed++;
-				consecutiveFailures = 0;
-			} else if (r === "refused") {
-				result.refused++;
-				consecutiveFailures = 0;
+	const poolResults = await runPool(tasks, config.analyze.parallelism, {
+		signal,
+		delayMs: config.analyze.delay_ms > 0 ? config.analyze.delay_ms : undefined,
+		onTaskComplete: (pr, _idx) => {
+			if (pr.status === "ok") {
+				const r = pr.value;
+				if (r === "complete") {
+					consecutiveFailures = 0;
+				} else if (r === "refused") {
+					consecutiveFailures = 0;
+				} else {
+					consecutiveFailures++;
+				}
 			} else {
-				result.errors++;
 				consecutiveFailures++;
 			}
-		}
 
-		if (config.analyze.delay_ms > 0 && i < chunks.length - 1) {
-			await new Promise((r) => setTimeout(r, config.analyze.delay_ms));
+			if (consecutiveFailures >= config.analyze.max_consecutive_failures) {
+				logger.warn(
+					"Circuit breaker: {failures} consecutive failures, stopping analysis",
+					{ failures: consecutiveFailures },
+				);
+				return false;
+			}
+			return true;
+		},
+	});
+
+	for (const pr of poolResults) {
+		if (pr.status === "skipped") continue;
+		if (pr.status === "ok") {
+			if (pr.value === "complete") result.analyzed++;
+			else if (pr.value === "refused") result.refused++;
+			else result.errors++;
+		} else {
+			result.errors++;
 		}
 	}
 
@@ -266,6 +298,7 @@ async function analyzeSession(
 	sessionId: string,
 	parentId: string | null,
 	config: Awaited<ReturnType<typeof loadConfig>>,
+	onProgress?: (sessionId: string, outcome: string, topicCount: number) => void,
 ): Promise<"complete" | "refused" | "error"> {
 	const isSubagent = parentId != null;
 
@@ -410,9 +443,8 @@ async function analyzeSession(
 
 			if (isRefusal) {
 				const reason = `Model refused: ${truncate(raw, 500)}`;
-				logger.debug("Session {sessionId}: refused — {reason}", {
-					sessionId,
-					reason: truncate(reason, 200),
+				logger.warn("Session {sessionId}: model refused", {
+					sessionId: sessionId.slice(0, 8),
 				});
 				await run(
 					db,
@@ -459,10 +491,11 @@ async function analyzeSession(
 			config.analyze.model,
 			sessionId,
 		);
+		onProgress?.(sessionId, output.outcome, output.topics.length);
 		return "complete";
 	} catch (err: unknown) {
-		logger.debug("Session {sessionId}: error — {error}", {
-			sessionId,
+		logger.warn("Session {sessionId}: error — {error}", {
+			sessionId: sessionId.slice(0, 8),
 			error: String(err),
 		});
 		const retryCount = await all<{ retry_count: number }>(
@@ -486,10 +519,10 @@ async function analyzeSession(
 				sessionId,
 			);
 		} else {
-			logger.debug(
-				"Session {sessionId}: max retries exhausted, marking error",
-				{ sessionId },
-			);
+			logger.warn("Session {sessionId}: max retries exhausted", {
+				sessionId: sessionId.slice(0, 8),
+				max: config.analyze.max_retries,
+			});
 			await run(
 				db,
 				"UPDATE analysis SET status = 'error', error_reason = ? WHERE session_id = ?",
@@ -549,14 +582,6 @@ export function tryExtractAnalysisOutput(
 		{ sessionId, errors },
 	);
 	return null;
-}
-
-function chunkArray<T>(arr: T[], size: number): T[][] {
-	const chunks: T[][] = [];
-	for (let i = 0; i < arr.length; i += size) {
-		chunks.push(arr.slice(i, i + size));
-	}
-	return chunks;
 }
 
 function truncate(s: string, maxLen: number): string {

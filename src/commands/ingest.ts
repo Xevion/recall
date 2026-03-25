@@ -2,6 +2,7 @@ import { getLogger } from "@logtape/logtape";
 import { Command } from "commander";
 import { withDb } from "../db/index";
 import { ingest } from "../ingest/index";
+import { getShutdownController } from "../utils/shutdown";
 
 const logger = getLogger(["recall", "cli", "ingest"]);
 
@@ -15,19 +16,28 @@ export const ingestCommand = new Command("ingest")
 	.option("--since <date>", "Only ingest sessions after this date")
 	.option("--force", "Re-ingest all sessions, ignoring ingest log", false)
 	.action(async (opts) => {
+		const { signal } = getShutdownController();
 		await withDb(async (db) => {
-			const results = await ingest(db, {
-				source: opts.source,
-				since: opts.since,
-				force: opts.force,
-			});
+			const results = await ingest(
+				db,
+				{
+					source: opts.source,
+					since: opts.since,
+					force: opts.force,
+				},
+				signal,
+			);
 
 			for (const r of results) {
-				logger.info("{source}: {ingested} ingested, {skipped} skipped", {
-					source: r.source,
-					ingested: r.sessionsIngested,
-					skipped: r.sessionsSkipped,
-				});
+				logger.info(
+					"{source}: {ingested} ingested, {skipped} skipped ({elapsed}s)",
+					{
+						source: r.source,
+						ingested: r.sessionsIngested,
+						skipped: r.sessionsSkipped,
+						elapsed: (r.elapsedMs / 1000).toFixed(1),
+					},
+				);
 				for (const err of r.errors) {
 					logger.error("{source}: {error}", { source: r.source, error: err });
 				}

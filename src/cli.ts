@@ -15,6 +15,7 @@ import { statsCommand } from "./commands/stats";
 import { toolsCommand } from "./commands/tools";
 import { close } from "./db/index";
 import { setupLogging, teardownLogging } from "./logging/setup";
+import { getShutdownController, installSignalHandlers } from "./utils/shutdown";
 import { ValidationError } from "./utils/validation";
 
 const program = new Command()
@@ -29,14 +30,29 @@ const program = new Command()
 	)
 	.option("-q, --quiet", "Suppress non-essential output")
 	.option("--log-file <path>", "Write JSONL logs to file")
-	.hook("preAction", async (_thisCommand) => {
+	.hook("preAction", async (thisCommand) => {
 		const opts = program.opts();
 		await setupLogging({
 			verbosity: opts.verbose as number,
 			quiet: !!opts.quiet,
 			logFile: opts.logFile as string | undefined,
 		});
+
+		const cmdName = thisCommand.name();
+		let forceTimeoutMs = 3000;
+		if (cmdName === "analyze") forceTimeoutMs = 30000;
+		else if (cmdName === "ingest") forceTimeoutMs = 5000;
+
+		installSignalHandlers(controller, forceTimeoutMs);
 	});
+
+const controller = getShutdownController();
+controller.onShutdown(async () => {
+	await close();
+});
+controller.onShutdown(async () => {
+	await teardownLogging();
+});
 
 program.addCommand(ingestCommand);
 program.addCommand(analyzeCommand);
@@ -52,20 +68,15 @@ program.addCommand(researchCommand);
 program.addCommand(projectsCommand);
 program.addCommand(statsCommand);
 
-async function shutdown(): Promise<void> {
-	await teardownLogging();
-	await close();
-	process.exit(0);
-}
-
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-
-program.parseAsync().catch(async (err) => {
-	if (err instanceof ValidationError) {
-		console.error(err.message);
-		await teardownLogging();
-		process.exit(1);
-	}
-	throw err;
-});
+program
+	.parseAsync()
+	.catch(async (err) => {
+		if (err instanceof ValidationError) {
+			console.error(err.message);
+			process.exit(1);
+		}
+		throw err;
+	})
+	.finally(async () => {
+		await controller.executeShutdown();
+	});

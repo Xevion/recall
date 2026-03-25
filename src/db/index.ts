@@ -1,7 +1,10 @@
 import { type DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
+import { getLogger } from "@logtape/logtape";
 import { loadConfig } from "../config";
 import { expandPath } from "../utils/path";
 import { initSchema } from "./schema";
+
+const logger = getLogger(["recall", "db"]);
 
 let _instance: DuckDBInstance | null = null;
 let _conn: DuckDBConnection | null = null;
@@ -11,6 +14,7 @@ export async function getConnection(): Promise<DuckDBConnection> {
 
 	const config = await loadConfig();
 	const dbPath = expandPath(config.database.path);
+	logger.debug("Opening database at {path}", { path: dbPath });
 
 	// Ensure parent directory exists
 	const dir = dbPath.substring(0, dbPath.lastIndexOf("/"));
@@ -19,6 +23,7 @@ export async function getConnection(): Promise<DuckDBConnection> {
 	_instance = await DuckDBInstance.create(dbPath);
 	_conn = await _instance.connect();
 	await initSchema(_conn);
+	logger.debug("Database ready");
 	return _conn;
 }
 
@@ -74,6 +79,7 @@ export async function close(): Promise<void> {
 
 export async function withDb<T>(
 	fn: (db: DuckDBConnection) => Promise<T>,
+	_signal?: AbortSignal,
 ): Promise<T> {
 	const db = await getConnection();
 	try {

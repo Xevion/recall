@@ -1,5 +1,8 @@
 import { resolve } from "node:path";
+import { getLogger } from "@logtape/logtape";
 import { parse } from "smol-toml";
+
+const logger = getLogger(["recall", "config"]);
 
 export interface RecallConfig {
 	database: {
@@ -120,6 +123,7 @@ export async function loadConfig(): Promise<RecallConfig> {
 	if (_config) return _config;
 
 	const path = configPath();
+	logger.debug("Loading config from {path}", { path });
 	const file = Bun.file(path);
 
 	if (await file.exists()) {
@@ -134,6 +138,7 @@ export async function loadConfig(): Promise<RecallConfig> {
 		_config = DEFAULT_CONFIG;
 	}
 
+	logger.debug("Config loaded");
 	return _config;
 }
 

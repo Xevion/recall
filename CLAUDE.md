@@ -36,6 +36,28 @@ Do NOT write temp bun/ts scripts to query the database. The duckdb binary is fas
 2. If yes, wait for it to finish or ask the user to confirm it's safe to proceed
 3. Do NOT use `kill`, `pkill`, or similar to force-terminate recall processes
 
+## Graceful Shutdown
+
+Both `ingest` and `analyze` support graceful shutdown via AbortSignal:
+
+- **First Ctrl+C**: Signals abort — current unit of work finishes, then exits cleanly
+- **Second Ctrl+C**: Force quit with `process.exit(1)`
+- **Timeout**: Auto force-quit after 5s (ingest), 30s (analyze), 3s (read commands)
+
+The shutdown controller (`src/utils/shutdown.ts`) is a singleton accessed via `getShutdownController()`. Signal handlers are installed per-command in `cli.ts`'s `preAction` hook with context-dependent timeouts.
+
+## Logging Levels
+
+Log level policy for structured logging:
+
+- **info**: User-visible progress (session counts, milestones, completion counters)
+- **debug**: Implementation detail (per-file processing, triage decisions, prompt sizes)
+- **warn**: Recoverable errors (circuit breaker, retries exhausted, model refusals)
+- **error**: Fatal errors (rate limit rejection, unrecoverable failures)
+- **trace**: Verbose debugging (prompt previews, SDK message types)
+
+Verbosity mapping: default=info, `-v`=debug, `-vv`=trace, `-q`=error only
+
 ## Commands
 
 ```
@@ -73,7 +95,7 @@ Global flags: `-v`/`-vv`/`-vvv` (verbosity), `-q` (quiet), `--log-file <path>` (
 - `src/ingest/persist.ts` — shared `persistSession` used by both parsers
 - `src/ingest/claude-code.ts` — Claude Code JSONL parser
 - `src/ingest/opencode.ts` — OpenCode SQLite reader
-- `src/analyze/index.ts` — SDK orchestration (chunked `Promise.all`)
+- `src/analyze/index.ts` — SDK orchestration (pool-based concurrency via `runPool`)
 - `src/analyze/triage.ts` — skip/analyze decision logic
 - `src/analyze/prompt.ts` — LLM prompt construction
 - `src/analyze/research.ts` — research artifact extraction
@@ -88,6 +110,8 @@ Global flags: `-v`/`-vv`/`-vvv` (verbosity), `-q` (quiet), `--log-file <path>` (
 - `src/utils/format.ts` — formatting utilities (dates, durations, word wrap)
 - `src/utils/path.ts` — path helpers
 - `src/utils/validation.ts` — `ValidationError` and input validation
+- `src/utils/shutdown.ts` — shutdown controller singleton and signal handler setup
+- `src/utils/pool.ts` — signal-aware concurrency pool for analyze pipeline
 - `schemas/analysis-output.json` — JSON schema for LLM analysis output
 - `docs/design.md` — full design document
 
@@ -118,6 +142,8 @@ Global flags: `-v`/`-vv`/`-vvv` (verbosity), `-q` (quiet), `--log-file <path>` (
 - Ingest is idempotent via `ingest_log` (keyed on `source_path` + `file_mtime` for claude-code, `session_id` for opencode)
 - Subagent metadata read from `.meta.json` companion files alongside JSONL (claude-code only)
 - FTS indexes cover `message(content)`, `analysis(title, summary, actionable_insight)`, `research_artifact(topic, content)` — rebuilt via `fts` command or on demand
+- AbortSignal is threaded through write pipelines (ingest, analyze) for graceful shutdown; read commands rely on the force timeout
+- `runPool()` in `src/utils/pool.ts` replaces chunk-based `Promise.all` for analyze concurrency — supports abort signal and circuit breaker via `onTaskComplete` callback
 
 ## Full-Text Search
 

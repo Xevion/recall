@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { analyze } from "../analyze/index";
 import { withDb } from "../db/index";
 import { resolveSessionId } from "../db/queries";
+import { getShutdownController } from "../utils/shutdown";
 import {
 	parseIntOption,
 	parseRelativeDate,
@@ -26,19 +27,24 @@ export const analyzeCommand = new Command("analyze")
 	.option("--dry-run", "Show what would be analyzed without running LLM calls")
 	.action(async (opts) => {
 		const project = resolveProjectOption(opts.project);
+		const { signal } = getShutdownController();
 		await withDb(async (db) => {
 			let force: string | undefined;
 			if (opts.force) {
 				force = await resolveSessionId(db, opts.force);
 			}
 			const since = opts.since ? parseRelativeDate(opts.since) : undefined;
-			const result = await analyze(db, {
-				limit: parseIntOption(opts.limit, "limit"),
-				force,
-				project,
-				since,
-				dryRun: opts.dryRun,
-			});
+			const result = await analyze(
+				db,
+				{
+					limit: parseIntOption(opts.limit, "limit"),
+					force,
+					project,
+					since,
+					dryRun: opts.dryRun,
+				},
+				signal,
+			);
 			if (opts.dryRun) {
 				logger.info("Dry run: {analyzed} to analyze, {skipped} to skip", {
 					...result,

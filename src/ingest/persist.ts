@@ -94,7 +94,21 @@ export async function persistSession(
 
 		await conn.run(
 			`INSERT INTO analysis (session_id, status) VALUES ($session_id, 'pending')
-			 ON CONFLICT DO NOTHING`,
+			 ON CONFLICT (session_id) DO UPDATE SET
+			   status = 'pending',
+			   title = NULL,
+			   summary = NULL,
+			   outcome = NULL,
+			   outcome_confidence = NULL,
+			   session_types = NULL,
+			   topics = NULL,
+			   frustrations = NULL,
+			   actionable_insight = NULL,
+			   error_reason = NULL,
+			   retry_count = 0,
+			   analyzed_at = NULL,
+			   analyzer_model = NULL
+			 WHERE analysis.status != 'pending'`,
 			{ session_id: session.id },
 		);
 	});

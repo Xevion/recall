@@ -25,6 +25,7 @@ export async function ingestClaudeCode(
 	const result: IngestResult = {
 		source: "claude-code",
 		sessionsIngested: 0,
+		sessionsReingested: 0,
 		sessionsSkipped: 0,
 		errors: [],
 		elapsedMs: 0,
@@ -69,22 +70,37 @@ export async function ingestClaudeCode(
 		});
 		try {
 			// Check ingest_log for idempotency
+			let isReingest = false;
 			if (!opts.force) {
 				const stat = await Bun.file(filePath).stat();
-				const existing = await all(
+				const mtimeIso = stat?.mtime?.toISOString();
+				// Compare mtime at SQL level (DuckDB TIMESTAMPTZ formatting differs from JS toISOString)
+				const exact = await all(
 					db,
 					"SELECT source_path FROM ingest_log WHERE source_path = ? AND file_mtime = ?",
 					filePath,
-					stat?.mtime?.toISOString(),
+					mtimeIso,
 				);
-				if (existing.length > 0) {
+				if (exact.length > 0) {
 					result.sessionsSkipped++;
 					continue;
 				}
+				// Not an exact match — check if path exists at all (re-ingest vs new)
+				const exists = await all(
+					db,
+					"SELECT source_path FROM ingest_log WHERE source_path = ?",
+					filePath,
+				);
+				isReingest = exists.length > 0;
 			}
 
 			const session = await parseClaudeCodeSession(filePath);
 			if (session) {
+				if (isReingest) {
+					logger.info("Re-ingesting continued session {id}", {
+						id: session.id,
+					});
+				}
 				await persistSession(db, session);
 				// Also ingest subagent sessions
 				const subagentDir = `${filePath.replace(/\.jsonl$/, "")}/subagents`;
@@ -114,7 +130,11 @@ export async function ingestClaudeCode(
 					stat?.mtime?.toISOString(),
 					session.id,
 				);
-				result.sessionsIngested++;
+				if (isReingest) {
+					result.sessionsReingested++;
+				} else {
+					result.sessionsIngested++;
+				}
 			}
 		} catch (err) {
 			logger.debug("Error processing {file}: {error}", {

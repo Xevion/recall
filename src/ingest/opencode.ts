@@ -26,6 +26,7 @@ export async function ingestOpenCode(
 	const result: IngestResult = {
 		source: "opencode",
 		sessionsIngested: 0,
+		sessionsReingested: 0,
 		sessionsSkipped: 0,
 		errors: [],
 		elapsedMs: 0,
@@ -85,29 +86,50 @@ export async function ingestOpenCode(
 			try {
 				const sessionId = `oc-${ocSession.id}`;
 
-				// Check if already ingested
+				// Check if already ingested (compare time_updated to detect continued sessions)
+				let isReingest = false;
 				if (!opts.force) {
-					const existing = await all(
+					const timeUpdatedIso = new Date(ocSession.time_updated).toISOString();
+					// Compare at SQL level (DuckDB TIMESTAMPTZ formatting differs from JS toISOString)
+					const exact = await all(
+						db,
+						"SELECT source_path FROM ingest_log WHERE session_id = ? AND file_mtime = ?",
+						sessionId,
+						timeUpdatedIso,
+					);
+					if (exact.length > 0) {
+						result.sessionsSkipped++;
+						continue;
+					}
+					// Not an exact match — check if session exists at all (re-ingest vs new)
+					const exists = await all(
 						db,
 						"SELECT source_path FROM ingest_log WHERE session_id = ?",
 						sessionId,
 					);
-					if (existing.length > 0) {
-						result.sessionsSkipped++;
-						continue;
-					}
+					isReingest = exists.length > 0;
 				}
 
 				const session = parseOpenCodeSession(sqlite, ocSession, sessionId);
 				if (session) {
+					if (isReingest) {
+						logger.info("Re-ingesting continued session {id}", {
+							id: sessionId,
+						});
+					}
 					await persistSession(db, session);
 					await run(
 						db,
-						"INSERT OR REPLACE INTO ingest_log (source_path, source, session_id) VALUES (?, 'opencode', ?)",
+						"INSERT OR REPLACE INTO ingest_log (source_path, source, file_mtime, session_id) VALUES (?, 'opencode', ?, ?)",
 						`opencode:${ocSession.id}`,
+						new Date(ocSession.time_updated).toISOString(),
 						sessionId,
 					);
-					result.sessionsIngested++;
+					if (isReingest) {
+						result.sessionsReingested++;
+					} else {
+						result.sessionsIngested++;
+					}
 				}
 			} catch (err) {
 				logger.debug("Error processing {session}: {error}", {

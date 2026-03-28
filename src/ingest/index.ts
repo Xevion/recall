@@ -16,6 +16,7 @@ export interface IngestOptions {
 export interface IngestResult {
 	source: string;
 	sessionsIngested: number;
+	sessionsReingested: number;
 	sessionsSkipped: number;
 	errors: string[];
 	elapsedMs: number;

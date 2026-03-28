@@ -44,15 +44,15 @@ export const ingestCommand = new Command("ingest")
 			}
 
 			for (const r of results) {
-				logger.info(
-					"{source}: {ingested} ingested, {skipped} skipped ({elapsed}s)",
-					{
-						source: r.source,
-						ingested: r.sessionsIngested,
-						skipped: r.sessionsSkipped,
-						elapsed: (r.elapsedMs / 1000).toFixed(1),
-					},
-				);
+				const parts = [`${r.sessionsIngested} ingested`];
+				if (r.sessionsReingested > 0) {
+					parts.push(`${r.sessionsReingested} re-ingested`);
+				}
+				parts.push(`${r.sessionsSkipped} skipped`);
+				logger.info(`{source}: ${parts.join(", ")} ({elapsed}s)`, {
+					source: r.source,
+					elapsed: (r.elapsedMs / 1000).toFixed(1),
+				});
 				for (const err of r.errors) {
 					logger.error("{source}: {error}", { source: r.source, error: err });
 				}
